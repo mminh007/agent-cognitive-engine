@@ -1,0 +1,21 @@
+// protos/chat.proto
+syntax = "proto3";
+
+package chat;
+
+option csharp_namespace = "AgentApp.Protos";
+
+// Service định nghĩa các API
+service AgentService {
+  rpc StreamChat (ChatRequest) returns (stream ChatResponse);
+}
+
+message ChatRequest {
+  string user_id = 1;
+  string session_id = 2;
+  string prompt = 3;
+}
+
+message ChatResponse {
+  string chunk = 1;
+}

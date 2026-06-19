@@ -1,0 +1,58 @@
+﻿@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Workspace Core Dashboard";
+}
+
+<link href="~/css/chat.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="app-wrapper">
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <button class="btn btn-new-chat w-100 rounded-pill" id="btn-new-chat">
+                <i class="bi bi-plus-lg me-2"></i> Cuộc trò chuyện mới
+            </button>
+        </div>
+
+        <div class="session-list" id="session-container">
+        </div>
+
+        <div class="profile-area">
+            <div class="d-flex align-items-center justify-content-between">
+                <div class="d-flex align-items-center text-truncate">
+                    <i class="bi bi-person-circle fs-4 text-secondary me-2"></i>
+                    <span class="small fw-bold text-white text-truncate" id="lbl-username">Guest Mode</span>
+                </div>
+                <button class="btn btn-sm btn-link text-danger p-0 text-decoration-none" id="btn-auth-action" title="Login">
+                    <i class="bi bi-box-arrow-in-right fs-5"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="chat-area">
+        <div class="chat-messages" id="chat-messages-container">
+            <div class="message-box ai">
+                <i class="bi bi-robot me-2 text-info fs-5"></i>
+                <span>Xin chào! Hệ thống AI Agent đã sẵn sàng. Hãy nhập câu hỏi của bạn.</span>
+            </div>
+        </div>
+
+        <div class="chat-footer">
+            <div class="input-wrapper">
+                <textarea class="chat-input" id="user-input" rows="1" placeholder="Hỏi Agent bất cứ điều gì..."></textarea>
+                <button class="btn-send" id="btn-submit" disabled>
+                    <i class="bi bi-arrow-up-short fs-4"></i>
+                </button>
+            </div>
+            <div id="guest-warning" class="text-center text-warning mt-3 d-none" style="font-size: 12px;">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i> Bạn đang chat ở chế độ Guest. Lịch sử sẽ không được lưu khi tải lại trang.
+            </div>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <script src="~/js/chat.js" asp-append-version="true"></script>
+}

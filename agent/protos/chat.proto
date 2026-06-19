@@ -1,0 +1,26 @@
+// protos/chat.proto
+syntax = "proto3";
+
+// Định nghĩa package cho Python
+package chat;
+
+// Định nghĩa Namespace cho ASP.NET Core C# sau này dễ gọi
+option csharp_namespace = "AgentApp.Protos";
+
+// Service định nghĩa các API
+service AgentService {
+  // Hàm nhận 1 Request và trả về 1 Stream (luồng) các Response
+  rpc StreamChat (ChatRequest) returns (stream ChatResponse);
+}
+
+// Cấu trúc dữ liệu đầu vào (tương đương class ChatRequest bên Pydantic)
+message ChatRequest {
+  string user_id = 1;
+  string session_id = 2;
+  string prompt = 3;
+}
+
+// Cấu trúc dữ liệu trả về stream (chứa từng từ/token của AI)
+message ChatResponse {
+  string chunk = 1;
+}

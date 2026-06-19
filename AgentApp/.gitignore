@@ -1,0 +1,95 @@
+# ==========================================
+# C# / .NET GITIGNORE
+# ==========================================
+
+# Visual Studio Cache and Build Outputs
+bin/
+obj/
+out/
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bsearch/
+rc/
+
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.useruser
+*.userosscache
+*.sln.docstates
+
+# Visual Studio 2015/2017/2019/2022 cache directories
+.vs/
+*TextTransform.txt
+
+# Visual Studio Product Archives
+*.pdb
+*.opencoverxml
+*.g.cs
+*.g.i.cs
+
+# Visual Studio Code
+.vscode/
+!.vscode/extensions.json
+.history/
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+
+# Mono Auto Generated Files
+mono_crash.*
+
+# NuGet Packages
+*.nupkg
+# NuGet Package Restore Marker Files
+project.fragment.lock.json
+project.lock.json
+package.lock.json
+# Packages directory (if not using global cache)
+packages/
+!packages/repositories.config
+
+# Paket dependency manager
+.paket/
+
+# Rider personal settings
+.idea/.idea.*/.idea/compiler.xml
+.idea/.idea.*/.idea/dbnavigator.xml
+.idea/.idea.*/.idea/deployment.xml
+.idea/.idea.*/.idea/editor.xml
+.idea/.idea.*/.idea/httpRequests/
+.idea/.idea.*/.idea/indexLayout.xml
+.idea/.idea.*/.idea/modules.xml
+.idea/.idea.*/.idea/project.view.xml
+.idea/.idea.*/.idea/runConfigurations/
+.idea/.idea.*/.idea/shelf/
+.idea/.idea.*/.idea/vcs.xml
+.idea/.idea.*/.idea/workspace.xml
+
+# MSBuild temporary files
+*.lnt
+*.wixobj
+*.suo
+*.temp
+*.tmp
+*.log
+
+# Windows temporary files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Mac temporary files
+.DS_Store
+
+# Local App Settings / Secrets 
+appsettings.Development.json
+appsettings.Local.json
+*.secrets.json

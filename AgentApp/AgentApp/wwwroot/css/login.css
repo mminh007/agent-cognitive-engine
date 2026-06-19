@@ -1,0 +1,58 @@
+﻿/* Ép màn hình Login Fullscreen và canh giữa tuyệt đối */
+.auth-wrapper {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #0f0f10;
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.auth-card {
+    width: 100%;
+    max-width: 420px;
+    background-color: #1e1f20;
+    border: 1px solid #333;
+    border-radius: 16px;
+    padding: 40px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.auth-title {
+    color: #fff;
+    font-weight: 700;
+    margin-bottom: 5px;
+}
+
+.form-control-dark {
+    background-color: #131314;
+    border: 1px solid #444;
+    color: #e3e3e3;
+    padding: 12px 15px;
+    border-radius: 8px;
+    transition: border-color 0.2s;
+}
+
+    .form-control-dark:focus {
+        background-color: #1a1b1c;
+        border-color: #0d6efd;
+        color: #fff;
+        box-shadow: none;
+        outline: none;
+    }
+
+.btn-auth {
+    padding: 12px;
+    font-weight: 600;
+    border-radius: 8px;
+    letter-spacing: 0.5px;
+}
+
+.text-muted-custom {
+    color: #888;
+}

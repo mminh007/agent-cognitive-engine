@@ -1,0 +1,58 @@
+﻿@{
+    Layout = "_Layout";
+    ViewData["Title"] = "Sign In - AgentApp";
+}
+
+<link href="~/css/login.css" rel="stylesheet" asp-append-version="true" />
+
+<div class="auth-wrapper">
+    <div class="auth-card">
+        <div class="text-center mb-5">
+            <h3 class="auth-title"><i class="bi bi-hexagon-fill text-primary me-2"></i>Agent Platform</h3>
+            <p class="text-muted-custom small" id="auth-subtitle">Please sign in to access your workspace</p>
+        </div>
+
+        <form id="form-login">
+            <div class="mb-3">
+                <label class="form-label text-muted-custom small fw-bold">Username</label>
+                <input type="text" class="form-control form-control-dark w-100" id="login-username" placeholder="Enter your username" required>
+            </div>
+            <div class="mb-4">
+                <label class="form-label text-muted-custom small fw-bold">Password</label>
+                <input type="password" class="form-control form-control-dark w-100" id="login-password" placeholder="••••••••" required>
+            </div>
+            <div class="alert alert-danger d-none small p-2 rounded-2" id="login-error"></div>
+            <button type="submit" class="btn btn-primary btn-auth w-100 mt-2">Sign In</button>
+
+            <div class="text-center mt-4">
+                <span class="text-muted-custom small">New to platform?</span>
+                <a href="#" class="small text-primary text-decoration-none ms-1 fw-bold" id="link-show-register">Create account</a>
+            </div>
+        </form>
+
+        <form id="form-register" class="d-none">
+            <div class="mb-3">
+                <label class="form-label text-muted-custom small fw-bold">Choose Username</label>
+                <input type="text" class="form-control form-control-dark w-100" id="register-username" placeholder="Pick a unique name" required>
+            </div>
+            <div class="mb-4">
+                <label class="form-label text-muted-custom small fw-bold">Create Password</label>
+                <input type="password" class="form-control form-control-dark w-100" id="register-password" placeholder="At least 6 characters" required>
+            </div>
+
+            <div class="alert alert-danger d-none small p-2 rounded-2" id="register-error"></div>
+            <div class="alert alert-success d-none small p-2 rounded-2" id="register-success"></div>
+
+            <button type="submit" class="btn btn-success btn-auth w-100 mt-2">Register Now</button>
+
+            <div class="text-center mt-4">
+                <span class="text-muted-custom small">Already have an account?</span>
+                <a href="#" class="small text-primary text-decoration-none ms-1 fw-bold" id="link-show-login">Sign In here</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/login.js" asp-append-version="true"></script>
+}

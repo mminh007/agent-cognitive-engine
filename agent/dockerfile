@@ -1,0 +1,23 @@
+# Utilize python 3.11 slim baseline image variant to control total container size
+FROM python:3.11-slim
+
+# Establish the functional runtime processing root pathway inside the isolated workspace
+WORKDIR /app
+
+# Package and install operational python package dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Ingest full local directory source codes into the workspace layer
+COPY . .
+
+# Expose internal port allocations targeting downstream proxy load balancers
+EXPOSE 8000
+EXPOSE 50051
+
+# Grant execution authorization privileges to the initialization orchestrator script
+RUN chmod +x entrypoint.sh
+
+# Bootstrap the dual microservice server engine execution scope via script router
+CMD ["./entrypoint.sh"]
+

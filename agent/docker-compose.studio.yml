@@ -1,0 +1,27 @@
+services:
+  langgraph_api:
+    build:
+      context: .
+      dockerfile: dockerfile.studio
+    container_name: agent_langgraph_studio
+    ports:
+      - "8123:8123"
+    environment:
+      - REDIS_URL=redis://redis_cache:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq_broker:5672/
+      - CHROMA_SERVER_HOST=chroma_server
+      - CHROMA_SERVER_PORT=8000
+      - LANGFUSE_HOST=http://langfuse_server:3000
+      - LANGGRAPH_STUDIO=true
+    env_file:
+      - .env
+    volumes:
+      - .:/app 
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
+    networks:
+      - agent_network
+
+networks:
+  agent_network:
+    external: true

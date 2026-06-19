@@ -1,0 +1,7 @@
+[
+    {
+        "name": "internal-custom-tools",
+        "command": "python",
+        "args": ["-m", "app.mcp.server"]
+    }
+]

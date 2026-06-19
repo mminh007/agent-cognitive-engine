@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  redis_cache:
+    image: redis:7-alpine
+    container_name: agent_redis
+    ports:
+      - "6379:6379"
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - agent_network
+
+  rabbitmq_broker:
+    image: rabbitmq:3-management-alpine
+    container_name: agent_rabbitmq
+    ports:
+      - "5672:5672"   
+      - "15672:15672" 
+    restart: always
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agent_network
+
+  # 🚀 (Centralized Server Mode)
+  chroma_server:
+    image: chromadb/chroma:0.5.15
+    container_name: agent_chroma_server
+    ports:
+      - "8010:8000" 
+    volumes:
+      - chroma_data:/chroma/chroma
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks:
+      - agent_network
+
+  # ─── CONTAINER 1: FASTAPI REST & STREAM WEB SERVER ───
+  agent_api:
+    build: .
+    container_name: agent_api_server
+    command: ["./entrypoint.sh", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"   
+    volumes:
+      - ./:/app
+      - ${LOGS_DIR:-./logs}:/app/logs 
+    environment:
+      - REDIS_URL=redis://redis_cache:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq_broker:5672/
+      - CHROMA_SERVER_HOST=chroma_server
+      - CHROMA_SERVER_PORT=8000
+    env_file:
+      - .env
+    depends_on:
+      redis_cache:
+        condition: service_healthy
+      rabbitmq_broker:
+        condition: service_healthy
+      chroma_server:
+        condition: service_healthy
+    restart: always
+    networks:
+      - agent_network
+
+  # ─── CONTAINER 2: GRPC STREAMING ENGINE ───
+  agent_grpc:
+    build: .
+    container_name: agent_grpc_server
+    command: ["./entrypoint.sh", "python", "-m", "app.grpc_server"]
+    ports:
+      - "50051:50051" 
+    volumes:
+      - ./:/app
+      - ${LOGS_DIR:-./logs}:/app/logs
+    environment:
+      - REDIS_URL=redis://redis_cache:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq_broker:5672/
+      - CHROMA_SERVER_HOST=chroma_server
+      - CHROMA_SERVER_PORT=8000
+    env_file:
+      - .env
+    depends_on:
+      redis_cache:
+        condition: service_healthy
+      rabbitmq_broker:
+        condition: service_healthy
+      chroma_server:
+        condition: service_healthy
+    restart: always
+    networks:
+      - agent_network
+
+  # ─── CONTAINER 3: ASYNC MEMORY EXTRACTION WORKER ───
+  memory_worker:
+    build: .
+    container_name: agent_memory_worker
+    command: ["./entrypoint.sh", "python", "-m", "app.worker_main"]
+    volumes:
+      - ./:/app
+      - ${LOGS_DIR:-./logs}:/app/logs
+    environment:
+      - REDIS_URL=redis://redis_cache:6379/0
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq_broker:5672/
+      - CHROMA_SERVER_HOST=chroma_server
+      - CHROMA_SERVER_PORT=8000
+    env_file:
+      - .env
+    depends_on:
+      rabbitmq_broker:
+        condition: service_healthy
+      chroma_server:
+        condition: service_healthy
+    restart: always
+    networks:
+      - agent_network
+
+volumes:
+  chroma_data:
+
+networks:
+  agent_network:
+    external: true 
