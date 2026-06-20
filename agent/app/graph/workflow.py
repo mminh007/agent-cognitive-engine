@@ -11,7 +11,10 @@ from app.graph.nodes import (
     node_general_agent, 
     node_research_paper_agent, 
     node_vision_detection_agent,
-    node_planner_agent
+    node_planner_agent,
+    node_critic_agent,
+    node_final_synthesizer,
+    node_reflection_agent
 )
 from app.mcp.mcp_client import get_mcp_tools
 from app.core.logger import setup_app_logger
@@ -30,40 +33,38 @@ workflow.add_node("general_memory", node_general_agent)
 workflow.add_node("research_papers", node_research_paper_agent)
 workflow.add_node("vision_detection", node_vision_detection_agent)
 workflow.add_node("planner", node_planner_agent)
+workflow.add_node("critic_agent", node_critic_agent)
+workflow.add_node("reflection_agent", node_reflection_agent)
+workflow.add_node("final_synthesizer", node_final_synthesizer)
 
 # Enforce entry points through the Intent Supervisor
 workflow.set_entry_point("supervisor_router")
 
-# ─── PHASE 2: CONFIGURABLE HARD LIMITS ───
-MAX_ITERATIONS = 8        # Prevent infinite Thought/Action loops
-MAX_TOOL_CALLS = 10       # Prevent budget drain
+# ─── PHASE 1: ROUTING & PLANNING ───
+# Supervisor always dictates the objective and delegates to Planner
+workflow.add_edge("supervisor_router", "planner")
 
-def conditional_agent_routing(state: AgentState) -> str:
-    """Evaluates the calculated intent domain parameter to switch processing lanes."""
+def route_from_planner(state: AgentState) -> str:
+    """Delegates the planned tasks to the appropriate specific execution lane."""
     target_destination = state.get("current_domain", "general_memory")
-    # 🚀 PHASE 2: Route Research requests to the Planner first
-    if target_destination == "research_papers":
-        return "planner"
-        
-    if target_destination in ["general_memory", "vision_detection"]:
+    if target_destination in ["general_memory", "research_papers", "vision_detection"]:
         return target_destination
-        
     return "general_memory"
 
-# Wire the conditional logic pathways linking the Supervisor node to the specialist agents
 workflow.add_conditional_edges(
-    "supervisor_router",
-    conditional_agent_routing,
+    "planner",
+    route_from_planner,
     {
         "general_memory": "general_memory",
-        "planner": "planner",  # Planner takes over Research lane entry
+        "research_papers": "research_papers",
         "vision_detection": "vision_detection"
     }
 )
 
-# 🚀 PHASE 2: Planner strictly transitions to the Research Agent to execute tasks
-workflow.add_edge("planner", "research_papers")
 
+# ─── PHASE 2: CONFIGURABLE HARD LIMITS ───
+MAX_ITERATIONS = 8        # Prevent infinite Thought/Action loops
+MAX_TOOL_CALLS = 10       # Prevent budget drain
 
 def generate_tool_hash(tool_name: str, args: dict) -> str:
     """Creates a unique deterministic hash for a tool call to detect exact duplicates."""
@@ -79,12 +80,12 @@ def evaluate_tool_hooks(state: AgentState) -> str:
     session_id = state.get("session_id", "UNKNOWN_SESSION")
     
     if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
-        return END
+        return "critic_agent"
 
     # 1. MAX ITERATION & BUDGET SAFEGUARD
     if state.get("iteration_count", 0) >= MAX_ITERATIONS or state.get("tool_call_count", 0) >= MAX_TOOL_CALLS:
         logger.warning(f"🛑 [Safeguard Tripped] Session {session_id}: Max loops/tools reached. Forcing termination.")
-        return END
+        return "critic_agent"
 
     action_history = state.get("action_history", [])
     
@@ -93,11 +94,12 @@ def evaluate_tool_hooks(state: AgentState) -> str:
         t_hash = generate_tool_hash(tool_call['name'], tool_call['args'])
         if t_hash in action_history:
             logger.warning(f"🛑 [Duplicate Detection] Blocked redundant tool call: {tool_call['name']}")
-            return END
+            return "critic_agent"
             
     tool_names = [t['name'] for t in last_message.tool_calls]
     logger.info(f"==> [Tool Action Dispatched] Session: {session_id} -> Executing: {tool_names}")
     return "execute_tools"
+
 
 async def action_tracker_node(state: AgentState):
     """
@@ -123,9 +125,10 @@ workflow.add_node("action_tracker", action_tracker_node)
 workflow.add_node("tools", tool_node)
 
 # Bind tool validation endpoints across all worker components
-workflow.add_conditional_edges("general_memory", evaluate_tool_hooks, {"execute_tools": "action_tracker", END: END})
-workflow.add_conditional_edges("research_papers", evaluate_tool_hooks, {"execute_tools": "action_tracker", END: END})
-workflow.add_conditional_edges("vision_detection", evaluate_tool_hooks, {"execute_tools": "action_tracker", END: END})
+executor_map = {"execute_tools": "action_tracker", "critic_agent": "critic_agent"}
+workflow.add_conditional_edges("general_memory", evaluate_tool_hooks, executor_map)
+workflow.add_conditional_edges("research_papers", evaluate_tool_hooks, executor_map)
+workflow.add_conditional_edges("vision_detection", evaluate_tool_hooks, executor_map)
 
 # Link tracker directly to the actual LangChain ToolNode
 workflow.add_edge("action_tracker", "tools")
@@ -149,6 +152,11 @@ workflow.add_conditional_edges(
         "vision_detection": "vision_detection"
     }
 )
+
+# ─── PHASE 3: EVALUATION & SYNTHESIS PIPELINE ───
+workflow.add_edge("critic_agent", "reflection_agent")
+workflow.add_edge("reflection_agent", "final_synthesizer")
+workflow.add_edge("final_synthesizer", END)
 
 compiled_graph = workflow.compile(name="compiled_graph") 
 

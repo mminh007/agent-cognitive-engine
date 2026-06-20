@@ -20,3 +20,8 @@ class AgentState(TypedDict):
     iteration_count: int         # Tracks graph cycles to enforce Max Iterations
     tool_call_count: int         # Tracks total tools invoked to enforce Budget Limits
     action_history: List[str]    # Records hashed tool calls to prevent Duplicate Actions
+
+    # ─── EVALUATION MEMORY ───
+    critic_feedback: Optional[str]
+    reflection_notes: Optional[str]
+    final_answer: Optional[str]

@@ -161,3 +161,8 @@ chroma_db/
 *.pt
 *.onnx
 .weights/
+
+# LangGraph checkpoints and memory stores
+*.pckl
+.langgraph_checkpoint.*
+.langgraph_ops.pckl

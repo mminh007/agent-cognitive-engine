@@ -69,8 +69,11 @@ def get_cached_bound_llm(domain: str, base_llm: ChatOpenAI) -> ChatOpenAI:
 
 # ─── STRUCTURED OUTPUT SCHEMAS ───
 class SupervisorRouterOutput(BaseModel):
-    target_agent: str = Field(description="The target domain matching intent criteria: 'general_memory', 'research_papers', or 'vision_detection'.")
-    rationale: str = Field(description="Internal chain-of-thought engineering justification for the assignment.")
+    target_agent: str = Field(description="The target domain: 'general_memory', 'research_papers', 'vision_detection', or 'coding_agent'.")
+    complexity: str = Field(description="Level of complexity: 'low', 'medium', 'high'.")
+    required_agents: List[str] = Field(description="List of agents needed to complete the tasks.")
+    objective: str = Field(description="The overarching execution objective for the Planner.")
+    rationale: str = Field(description="Internal chain-of-thought justification.")
 
 class ComplexityAssessment(BaseModel):
     requires_heavy_reasoning: bool = Field(description="Set to true if the request requires intense mathematics, complex transformer formulations, or o1-level chain of thought.")
@@ -82,6 +85,14 @@ class TaskItem(BaseModel):
 
 class PlannerOutput(BaseModel):
     tasks: List[TaskItem] = Field(description="List of sequential tasks required to fulfill the user's research request.")
+
+class CriticOutput(BaseModel):
+    objective_met: bool = Field(description="Assess if the executor fully achieved the initial objective.")
+    feedback: str = Field(description="Detailed feedback: Point out flaws, missing data, or provide positive reinforcement if optimal.")
+
+class ReflectionOutput(BaseModel):
+    needs_rework: bool = Field(description="Determine if the executor needs to rerun based on the critic's severity.")
+    actionable_advice: str = Field(description="Strict, actionable instructions for the executor or synthesis notes if passing.")
     
 structured_planner_llm = llm_tier2_balanced.with_structured_output(PlannerOutput)
 
@@ -130,8 +141,16 @@ async def node_supervisor_router(state: AgentState):
             SystemMessage(content=f"{manifest}\n\nAnalyze the current human message and extract the absolute routing domain."),
             HumanMessage(content=user_latest_message)
         ])
-        logger.info(f"==> [Supervisor Choice] Slot: [{decision.target_agent.upper()}] | Reason: {decision.rationale}")
-        return {"current_domain": decision.target_agent}
+        logger.info(f"\n\n==> [Process: SUPERVISOR_ROUTER] Initializing...")
+        logger.info(f"    Slot: [{decision.target_agent.upper()}] | Complexity: {decision.complexity.upper()}")
+        logger.info(f"    Objective: {decision.objective}\n")
+        
+        return {
+            "current_domain": decision.target_agent,
+            "complexity": decision.complexity,
+            "required_agents": decision.required_agents,
+            "objective": decision.objective
+        }
     except Exception as route_err:
         logger.error(f"❌ [ROUTER FAILURE] Defaulting to general framework -> Trace: {str(route_err)}")
         return {"current_domain": "general_memory"}
@@ -300,3 +319,80 @@ async def node_vision_detection_agent(state: AgentState):
     
     response = await llm_with_tools.ainvoke(compiled_messages)
     return {"messages": [response]}
+
+
+# --- EVALUATION NODE --- 
+async def node_critic_agent(state: AgentState):
+    """
+    Node 3: CRITIC_AGENT. Evaluates executor output against the overarching objective.
+    """
+    logger.info(f"\n\n==> [Process: CRITIC_AGENT] Auditing execution trajectory...")
+    
+    objective = state.get("objective", "Provide a comprehensive answer.")
+    executor_payload = state["messages"][-1].content
+    
+    structured_critic = llm_tier2_balanced.with_structured_output(CriticOutput)
+    
+    evaluation_prompt = (
+        f"You are the strict CRITIC_AGENT.\n"
+        f"MASTER OBJECTIVE: {objective}\n\n"
+        f"EXECUTOR'S PAYLOAD:\n{executor_payload}\n\n"
+        f"Critically analyze if the Executor fulfilled the objective. Expose missing data or hallucinated parameters."
+    )
+    
+    evaluation: CriticOutput = await structured_critic.ainvoke([HumanMessage(content=evaluation_prompt)])
+    
+    logger.info(f"    Status: {'✅ MET' if evaluation.objective_met else '❌ DEFICIENT'}")
+    logger.info(f"    Feedback: {evaluation.feedback}\n")
+    
+    return {"critic_feedback": evaluation.feedback}
+
+
+async def node_reflection_agent(state: AgentState):
+    """
+    Node 4: REFLECTION_AGENT. Synthesizes critic feedback into actionable directives.
+    """
+    logger.info(f"\n\n==> [Process: REFLECTION_AGENT] Formulating operational reflection...")
+    
+    critic_feedback = state.get("critic_feedback", "No anomalies detected.")
+    executor_payload = state["messages"][-1].content
+    
+    structured_reflection = llm_tier2_balanced.with_structured_output(ReflectionOutput)
+    
+    reflection_prompt = (
+        f"You are the REFLECTION_AGENT.\n"
+        f"CRITIC'S AUDIT:\n{critic_feedback}\n\n"
+        f"EXECUTOR'S PAYLOAD:\n{executor_payload}\n\n"
+        f"Determine if rework is absolutely required. If yes, generate strict instructions. If no, draft a synthesis memo."
+    )
+    
+    reflection: ReflectionOutput = await structured_reflection.ainvoke([HumanMessage(content=reflection_prompt)])
+    
+    logger.info(f"    Correction Required: {reflection.needs_rework}")
+    logger.info(f"    Directive: {reflection.actionable_advice}\n")
+    
+    return {"reflection_notes": reflection.actionable_advice}
+
+
+async def node_final_synthesizer(state: AgentState):
+    """
+    Node 5: FINAL_SYNTHESIZER. Compiles the ultimate formatted response.
+    """
+    logger.info(f"\n\n==> [Process: FINAL_SYNTHESIZER] Constructing final payload...")
+    
+    original_prompt = state["messages"][0].content
+    executor_payload = state["messages"][-1].content
+    reflection_notes = state.get("reflection_notes", "")
+    
+    synthesis_prompt = (
+        "You are the FINAL_SYNTHESIZER. Integrate the core data and reflection notes into a highly polished, markdown-formatted response.\n"
+        f"<user_query>\n{original_prompt}\n</user_query>\n"
+        f"<raw_data>\n{executor_payload}\n</raw_data>\n"
+        f"<reflection>\n{reflection_notes}\n</reflection>"
+    )
+    
+    final_response = await llm_tier2_balanced.ainvoke([HumanMessage(content=synthesis_prompt)])
+    
+    logger.info(f"    Process Complete. Handshake ready.\n\n")
+    
+    return {"messages": [final_response]}
