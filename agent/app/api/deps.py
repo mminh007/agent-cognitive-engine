@@ -10,7 +10,7 @@ async def get_agent_graph()-> AsyncGenerator:
     Dependency provider that yields the compiled LangGraph execution instance.
     This lifecycle isolate allows easy mock injections during automated unit tests.
     """
-    async with AsyncRedisSaver.from_url(settings.redis.url) as saver:
+    async with AsyncRedisSaver(redis_url=settings.redis.url) as saver:
         runtime_graph = compiled_graph.compile(checkpointer=saver)
         yield runtime_graph
 

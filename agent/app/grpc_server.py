@@ -15,7 +15,20 @@ from app.core.logger import setup_app_logger
 from app.graph.workflow import compiled_graph
 from app.mcp.mcp_client import mcp_manager
 
+from prometheus_client import Gauge, Counter
+from prometheus_client import start_http_server
+
 logger = setup_app_logger("GrpcServerCore")
+
+GRPC_ACTIVE_STREAMS = Gauge(
+    'grpc_active_streams', 
+    'Number of concurrent active gRPC chat streams currently processing'
+)
+
+GRPC_ERRORS_TOTAL = Counter(
+    'grpc_errors_total', 
+    'Total number of gRPC runtime pipeline exceptions caught'
+)
 
 class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
     def __init__(self):
@@ -24,6 +37,9 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
     async def StreamChat(self, request: chat_pb2.ChatRequest, context: grpc.aio.ServicerContext):
         logger.info(f"==> [gRPC] Received request from User: {request.user_id}, Session: {request.session_id}")
         
+        # 🚀 METRIC: Increment active stream gauge
+        GRPC_ACTIVE_STREAMS.inc()
+
         initial_state = {
             "messages": [HumanMessage(content=request.prompt)],
             "user_id": request.user_id,
@@ -83,11 +99,19 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
                 )
 
         except Exception as e:
+            GRPC_ERRORS_TOTAL.inc()
             logger.error(f"==> [gRPC Error] Runtime exception caught in pipeline: {str(e)}")
             context.set_code(grpc.StatusCode.INTERNAL)
             context.set_details(str(e))
 
+        finally:
+            # METRIC: Decrement stream gauge upon termination
+            GRPC_ACTIVE_STREAMS.dec()
+
 async def serve():
+    await asyncio.to_thread(start_http_server, 8001)
+    logger.info("📊 gRPC Prometheus metrics exporter server listening securely on port 8001\n")
+    
     server = aio.server()
     chat_pb2_grpc.add_AgentServiceServicer_to_server(AgentServiceServicer(), server)
     listen_addr = '[::]:50051'

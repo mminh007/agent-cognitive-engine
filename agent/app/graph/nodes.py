@@ -15,6 +15,7 @@ from app.services.query_transformer import transform_user_query
 from app.mcp.tool_registry import get_tools_by_domain 
 from app.core.settings import settings
 from app.core.logger import setup_app_logger
+from app.core.metrics import GRAPH_ITERATIONS
 
 logger = setup_app_logger("CognitiveNodes")
 
@@ -393,6 +394,9 @@ async def node_final_synthesizer(state: AgentState):
     
     final_response = await llm_tier2_balanced.ainvoke([HumanMessage(content=synthesis_prompt)])
     
+    total_iterations = state.get("iteration_count", 0)
+    GRAPH_ITERATIONS.labels(domain=state.get("current_domain", "general_memory")).observe(total_iterations)
+
     logger.info(f"    Process Complete. Handshake ready.\n\n")
     
     return {"messages": [final_response]}

@@ -9,6 +9,7 @@ from rank_bm25 import BM25Okapi
 from app.core.settings import settings
 from langchain_openai import OpenAIEmbeddings
 from app.core.logger import setup_app_logger
+from app.core.metrics import SEMANTIC_CACHE_LOOKUPS
 
 logger = setup_app_logger("VectorDBService")
 
@@ -150,9 +151,15 @@ class VectorDBService:
                 distance = results["distances"][0][0]
                 if distance <= threshold:
                     logger.info(f"==> [Semantic Cache HIT] Distance: {distance}\n")
+                    SEMANTIC_CACHE_LOOKUPS.labels(status="hit").inc() # 🚀 METRIC
                     return results["documents"][0][0]
+            
+            SEMANTIC_CACHE_LOOKUPS.labels(status="miss").inc() # 🚀 METRIC
+
         except Exception as e:
             logger.error(f"Cache check error: {e}\n")
+            SEMANTIC_CACHE_LOOKUPS.labels(status="error").inc() # 🚀 METRIC
+            
         return None
 
     async def set_semantic_cache(self, query: str, response: str):

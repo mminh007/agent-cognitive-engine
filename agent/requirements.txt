@@ -46,3 +46,6 @@ tavily-python==0.7.26
 apscheduler==3.11.2
 grpcio==1.81.1
 grpcio-tools==1.81.1
+
+# MONITORING
+prometheus-client==0.20.0

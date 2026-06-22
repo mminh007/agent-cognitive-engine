@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s 
+
+scrape_configs:
+  - job_name: "http-metrics"
+    static_configs:
+      - targets: ["agent_api_server:8000"] 
+
+  - job_name: "grpc-metrics"
+    static_configs:
+      - targets: ["agent_grpc_server:8001"]

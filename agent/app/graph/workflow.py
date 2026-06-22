@@ -2,8 +2,8 @@
 import os
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.redis.aio import AsyncRedisSaver
-import redis
+#from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+#import redis
 import hashlib
 from app.graph.state import AgentState
 from app.graph.nodes import (
@@ -18,7 +18,7 @@ from app.graph.nodes import (
 )
 from app.mcp.mcp_client import get_mcp_tools
 from app.core.logger import setup_app_logger
-from app.core.settings import settings
+from app.core.metrics import FORCED_TERMINATION_TOTAL, DUPLICATE_TOOL_CALL_TOTAL, GRAPH_ITERATIONS
 
 logger = setup_app_logger("WorkflowOrchestrator")
 
@@ -78,13 +78,20 @@ def evaluate_tool_hooks(state: AgentState) -> str:
     """
     last_message = state["messages"][-1]
     session_id = state.get("session_id", "UNKNOWN_SESSION")
+    domain = state.get("current_domain", "general_memory")
     
     if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
         return "critic_agent"
 
     # 1. MAX ITERATION & BUDGET SAFEGUARD
-    if state.get("iteration_count", 0) >= MAX_ITERATIONS or state.get("tool_call_count", 0) >= MAX_TOOL_CALLS:
-        logger.warning(f"🛑 [Safeguard Tripped] Session {session_id}: Max loops/tools reached. Forcing termination.")
+    if state.get("iteration_count", 0) >= MAX_ITERATIONS:
+        logger.warning(f"🛑 [Safeguard Tripped] Session {session_id}: Max loops reached. Forcing termination.\n")
+        FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="max_iterations").inc() # 🚀 METRIC
+        return "critic_agent"
+    
+    if state.get("tool_call_count", 0) >= MAX_TOOL_CALLS:
+        logger.warning(f"🛑 [Safeguard Tripped] Session {session_id}: Max tools budget reached. Forcing termination.\n")
+        FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="budget_depleted").inc() # 🚀 METRIC
         return "critic_agent"
 
     action_history = state.get("action_history", [])
@@ -93,7 +100,9 @@ def evaluate_tool_hooks(state: AgentState) -> str:
     for tool_call in last_message.tool_calls:
         t_hash = generate_tool_hash(tool_call['name'], tool_call['args'])
         if t_hash in action_history:
-            logger.warning(f"🛑 [Duplicate Detection] Blocked redundant tool call: {tool_call['name']}")
+            logger.warning(f"🛑 [Duplicate Detection] Blocked redundant tool call: {tool_call['name']}\n")
+            DUPLICATE_TOOL_CALL_TOTAL.labels(tool_name=tool_call['name']).inc() # 🚀 METRIC
+            FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="duplicate_action").inc() # 🚀 METRIC
             return "critic_agent"
             
     tool_names = [t['name'] for t in last_message.tool_calls]

@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   redis_cache:
-    image: redis:7-alpine
+    image: redis/redis-stack-server:latest
     container_name: agent_redis
     ports:
       - "6379:6379"
@@ -82,6 +82,7 @@ services:
     command: ["./entrypoint.sh", "python", "-m", "app.grpc_server"]
     ports:
       - "50051:50051" 
+      - "8001:8001"
     volumes:
       - ./:/app
       - ${LOGS_DIR:-./logs}:/app/logs
@@ -126,9 +127,60 @@ services:
     restart: always
     networks:
       - agent_network
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.enable-remote-write-receiver'
+      - '--enable-feature=native-histograms'
+    container_name: agent_prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090" # Prometheus
+    restart: always
+    networks:
+      - agent_network
+
+  # 🚀  GRAFANA SERVER
+  grafana:
+    image: grafana/grafana:10.4.1
+    container_name: agent_grafana
+    ports:
+      - "3001:3000" # Dashboard port 3001 (User/Pass: admin/admin)
+    volumes:
+      - grafana_storage:/var/lib/grafana
+    restart: always
+    networks:
+      - agent_network
+  
+  # 🚀 INTEGRATION: K6 LOAD TESTING ENGINE
+  k6_load_test:
+    image: grafana/k6:latest
+    container_name: agent_k6_runner
+    networks:
+      - agent_network
+    volumes:
+      - ./load_tests:/load_tests
+    environment:
+      # Configure k6 to push metrics to Prometheus using Remote Write
+      - K6_PROMETHEUS_RW_SERVER_URL=http://prometheus:9090/api/v1/write
+
+      # Export Trend metrics as native Prometheus histograms
+      - K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=true
+
+    # Change the JavaScript file name according to the test scenario you want to run
+    command: run -o experimental-prometheus-rw /load_tests/${K6_SCRIPT}
+
+    depends_on:
+      agent_api:
+        condition: service_started
+      prometheus:
+        condition: service_started
 
 volumes:
   chroma_data:
+  grafana_storage:
 
 networks:
   agent_network:
