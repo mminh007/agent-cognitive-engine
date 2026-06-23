@@ -8,7 +8,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 from app.graph.state import AgentState
-from app.services.vector_db import vector_db_service
+from app.retrieval import HybridRetriever
 from app.services.query_transformer import transform_user_query
 
 # We now import a highly optimized O(1) tool retrieval function
@@ -16,6 +16,7 @@ from app.mcp.tool_registry import get_tools_by_domain
 from app.core.settings import settings
 from app.core.logger import setup_app_logger
 from app.core.metrics import GRAPH_ITERATIONS
+from app.bootstrap.container import container
 
 logger = setup_app_logger("CognitiveNodes")
 
@@ -197,7 +198,7 @@ async def node_general_agent(state: AgentState):
     
     # Context injected strictly against the root query to prevent context drifting
     user_initial_prompt = state["messages"][0].content if state["messages"] else ""
-    context = await vector_db_service.retrieve_context(user_id, user_initial_prompt, collection_name=current_domain)
+    context = await container.hybrid_search.retrieve(user_id, user_initial_prompt, collection_name=current_domain)
     manifest = load_agent_manifest_instructions()
     
     # Explicit topology instructions guiding the LLM how to parse ToolMessages natively
@@ -238,6 +239,7 @@ async def node_research_paper_agent(state: AgentState):
     """
     user_id = state.get("user_id", "UNKNOWN_USER")
     current_domain = state.get("current_domain", "research_papers")
+    hybird_search = HybridRetriever()
     
     # ─── WORKFLOW MEMORY INJECTION ───
     tasks = state.get("tasks", [])
@@ -250,7 +252,7 @@ async def node_research_paper_agent(state: AgentState):
     # Retrieve base RAG context
     user_initial_prompt = state["messages"][0].content if state["messages"] else ""
     optimized_query = await transform_user_query(user_initial_prompt)
-    rag_context = await vector_db_service.retrieve_context(user_id, optimized_query, collection_name=current_domain)
+    rag_context = await hybird_search.retrieve(user_id, optimized_query, collection_name=current_domain)
     
     # 🚀 REASONING & LOOP CONTROL PROMPT ENGINEERING
     system_content = (

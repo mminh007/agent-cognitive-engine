@@ -35,6 +35,8 @@ class ChromaSettings(BaseSettings):
     path: str = "./chroma_db"
     collection_name: str = "long_term_memory"
     embedding_model: str = "text-embedding-3-small"
+    server_host: str = "localhost"
+    server_port: str = "8000"
 
 # RabbitMQ configuration for potential future message queue integrations (search for "RabbitMQSettings" in the codebase for usage contexts)
 class RabbitMQSettings(BaseSettings):

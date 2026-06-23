@@ -9,11 +9,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "grpc_layer"))
 import chat_pb2
 import chat_pb2_grpc
 from langchain_core.messages import HumanMessage
-from app.api.deps import get_agent_graph
 from app.services.rabbitmq_publisher import publish_extraction_task
 from app.core.logger import setup_app_logger
 from app.graph.workflow import compiled_graph
 from app.mcp.mcp_client import mcp_manager
+from app.bootstrap.startup import startup, shutdown
 
 from prometheus_client import Gauge, Counter
 from prometheus_client import start_http_server
@@ -111,6 +111,8 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
 async def serve():
     await asyncio.to_thread(start_http_server, 8001)
     logger.info("📊 gRPC Prometheus metrics exporter server listening securely on port 8001\n")
+
+    await startup()
     
     server = aio.server()
     chat_pb2_grpc.add_AgentServiceServicer_to_server(AgentServiceServicer(), server)

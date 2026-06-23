@@ -10,6 +10,7 @@ from app.mcp.mcp_client import mcp_manager
 from app.api.router_registry import build_master_router
 from app.services.pruning_policy import run_pruning_policy
 from app.core.logger import setup_app_logger
+from bootstrap.startup import startup, shutdown
 
 logger = setup_app_logger("MainApp")
 scheduler = AsyncIOScheduler()
@@ -17,6 +18,9 @@ scheduler = AsyncIOScheduler()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage the background processes throughout the lifecycle of FastAPI."""
+
+    logger.info("⚙️ Bootstrapping application container...")
+    await startup()
 
     logger.info("⚙️ Connecting to external Upstream MCP Servers...")
     await mcp_manager.initialize_all_servers()
@@ -40,6 +44,9 @@ async def lifespan(app: FastAPI):
 
     logger.info("🛑 Shutting down MCP Server connections...")
     await mcp_manager.shutdown()
+
+    logger.info("🛑 Shutting down application container...")
+    await shutdown()
 
 # Core application engine setup
 app = FastAPI(

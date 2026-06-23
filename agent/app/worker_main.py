@@ -1,11 +1,13 @@
+# app/worker_main.py
 import asyncio
 import json
 import sys
 import aio_pika
 from app.core.settings import settings
 from langchain_core.messages import messages_from_dict
-from app.services.memory_worker import extract_and_save_facts
+from app.services import MemoryWorker
 from app.core.logger import setup_app_logger
+from bootstrap.container import container
 
 logger = setup_app_logger("WorkerMainCore")
 
@@ -26,8 +28,12 @@ async def process_message(message: aio_pika.IncomingMessage):
             
             messages = messages_from_dict(raw_messages)
             
+            memory_worker = MemoryWorker(
+                memory_service= container.memory_service,
+                extractor= container.extractor
+            )
             # Pass collection name downstream to isolate storage tasks
-            await extract_and_save_facts(user_id, target_collection, messages)
+            await memory_worker.process_extraction_task(user_id, target_collection, messages)
             
             logger.info(f"==> [Worker Resolution] Task resolved successfully for Session: {session_id}\n")
             
@@ -40,6 +46,9 @@ async def process_message(message: aio_pika.IncomingMessage):
 
 async def main():
     logger.info("⚙️ Memory Worker is booting and attempting connection hooks with RabbitMQ...")
+    
+    await container.initialize()
+
     connection = await aio_pika.connect_robust(settings.rabbitmq.url)
     
     async with connection:

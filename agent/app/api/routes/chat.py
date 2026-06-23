@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 import app.core.logger as logger
 from app.api.deps import get_agent_graph
-from app.services.vector_db import vector_db_service
+from app.bootstrap.container import container
 # Import Langfuse and LangSmith tracing utilities
 from langfuse.langchain import CallbackHandler
 from langchain_core.tracers import LangChainTracer
@@ -26,7 +26,7 @@ async def chat_stream_endpoint(
     graph = Depends(get_agent_graph)
 ):
     # Check semantic cache inside Vector DB to bypass LLM if hit
-    cached_reply = vector_db_service.check_semantic_cache(request.prompt)
+    cached_reply = await container.semantic_cache.get(request.prompt)
     if cached_reply:
         async def cached_generator():
             yield f"data: {cached_reply}\n\n"
@@ -106,7 +106,7 @@ async def chat_stream_endpoint(
 
         # Cache the completed response text if available
         if ai_full_response_text:
-            vector_db_service.set_semantic_cache(request.prompt, ai_full_response_text)
+            chroma_semantic_cache.set(request.prompt, ai_full_response_text)
 
         # Offload post-processing/extraction tasks asynchronously via RabbitMQ
         if final_state_messages:
