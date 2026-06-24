@@ -57,6 +57,32 @@ class LogsSettings(BaseSettings):
     max_bytes: int = 10485760
     backup_count: int = 5
 
+# MCP configuration for securing tool execution
+class McpSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="MCP_", extra="ignore")
+    jwt_secret: str = "default_mcp_jwt_secret_key_change_me_in_prod"
+
+# Security configuration for AI response signatures and handshake keys
+class SecuritySettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="SECURITY_", extra="ignore")
+    
+    # ECDSA SECP256R1 Private Key for signing AI Response Receipts
+    ai_receipt_private_key: str = (
+        "-----BEGIN PRIVATE KEY-----\n"
+        "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgjFtyyJvK2e6LduA+\n"
+        "Kj9T1m3noMLAIc2MP3vC1l/8BEahRANCAAR3T7bXX+jXw8E6U2y1toL7zbWINJZy\n"
+        "e1Sxr229hOal6CO/mpaLIQZifVAArsmVkvIedjHz3Pstx+f6+4UA4JFs\n"
+        "-----END PRIVATE KEY-----"
+    )
+    
+    # ECDSA SECP256R1 Public Key for B2B client verification
+    ai_receipt_public_key: str = (
+        "-----BEGIN PUBLIC KEY-----\n"
+        "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEd0+211/o18PBOlNstbaC+821iDSW\n"
+        "cntUsa9tvYTmpegjv5qWiyEGYn1QAK7JlZLyHnYx89z7Lcfn+vuFAOCRbA==\n"
+        "-----END PUBLIC KEY-----"
+    )
+
 class Settings(BaseSettings):
     """Unified application configuration manager grouping domain-specific sub-models."""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -67,6 +93,8 @@ class Settings(BaseSettings):
     rabbitmq: RabbitMQSettings = Field(default_factory=RabbitMQSettings)
     logs: LogsSettings = Field(default_factory=LogsSettings)
     tavily: TavilySettings = Field(default_factory=TavilySettings)
+    mcp: McpSettings = Field(default_factory=McpSettings)
+    security: SecuritySettings = Field(default_factory=SecuritySettings)
     
 @lru_cache()
 def get_settings() -> Settings:

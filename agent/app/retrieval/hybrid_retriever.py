@@ -3,8 +3,8 @@ from typing import List, Dict
 from app.interfaces import Retriever
 from app.interfaces import VectorStore
 from app.interfaces import EmbeddingProvider
-from app.retrieval import BM25Retriever
-from app.retrieval import RFF
+from .bm25_search import BM25Retriever
+from .rrf_search import RRF
 from app.core.logger import setup_app_logger
 
 logger = setup_app_logger("HybridRetriever")
@@ -70,7 +70,7 @@ class HybridRetriever(Retriever):
             )
 
             # ─── STEP 4: HYBRID SYNTHESIS (Using your RFF class) ───
-            fused_candidates = RFF._reciprocal_rank_fusion(dense_results, lexical_results, k=60)
+            fused_candidates = RRF._reciprocal_rank_fusion(dense_results, lexical_results, k=60)
             final_top_k = fused_candidates[:k]
 
             # ─── STEP 5: FORMAT OUTPUT RESULTS ───

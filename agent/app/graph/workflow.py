@@ -14,7 +14,8 @@ from app.graph.nodes import (
     node_planner_agent,
     node_critic_agent,
     node_final_synthesizer,
-    node_reflection_agent
+    node_reflection_agent,
+    node_task_manager
 )
 from app.mcp.mcp_client import get_mcp_tools
 from app.core.logger import setup_app_logger
@@ -35,6 +36,7 @@ workflow.add_node("vision_detection", node_vision_detection_agent)
 workflow.add_node("planner", node_planner_agent)
 workflow.add_node("critic_agent", node_critic_agent)
 workflow.add_node("reflection_agent", node_reflection_agent)
+workflow.add_node("task_manager", node_task_manager)
 workflow.add_node("final_synthesizer", node_final_synthesizer)
 
 # Enforce entry points through the Intent Supervisor
@@ -164,7 +166,45 @@ workflow.add_conditional_edges(
 
 # ─── PHASE 3: EVALUATION & SYNTHESIS PIPELINE ───
 workflow.add_edge("critic_agent", "reflection_agent")
-workflow.add_edge("reflection_agent", "final_synthesizer")
+
+def route_from_reflection(state: AgentState) -> str:
+    if state.get("needs_rework"):
+        domain = state.get("current_domain", "general_memory")
+        if domain in ["general_memory", "research_papers", "vision_detection"]:
+            return domain
+        return "general_memory"
+    return "task_manager"
+
+workflow.add_conditional_edges(
+    "reflection_agent",
+    route_from_reflection,
+    {
+        "general_memory": "general_memory",
+        "research_papers": "research_papers",
+        "vision_detection": "vision_detection",
+        "task_manager": "task_manager"
+    }
+)
+
+def route_from_task_manager(state: AgentState) -> str:
+    if state.get("current_task_id") is not None:
+        domain = state.get("current_domain", "general_memory")
+        if domain in ["general_memory", "research_papers", "vision_detection"]:
+            return domain
+        return "general_memory"
+    return "final_synthesizer"
+
+workflow.add_conditional_edges(
+    "task_manager",
+    route_from_task_manager,
+    {
+        "general_memory": "general_memory",
+        "research_papers": "research_papers",
+        "vision_detection": "vision_detection",
+        "final_synthesizer": "final_synthesizer"
+    }
+)
+
 workflow.add_edge("final_synthesizer", END)
 
 compiled_graph = workflow.compile(name="compiled_graph") 

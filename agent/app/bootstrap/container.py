@@ -18,8 +18,12 @@ class Container:
         self.extractor = None
         self.semantic_cache = None
         self.hybrid_search = None
+        self._initialized = False
 
     async def initialize(self):
+        if self._initialized:
+            return
+        self._initialized = True
 
         embedding_model = OpenAIEmbeddings(
             model=settings.chroma.embedding_model,
@@ -47,12 +51,12 @@ class Container:
 
         self.memory_service = MemoryService(self.memory_store)
 
+        self.extractor = FactExtractor(memory_llm)
+
         self.memory_worker = MemoryWorker(
             memory_service=self.memory_service,
-            extractor= self.extractor
+            extractor=self.extractor
         )
-
-        self.extractor = FactExtractor(memory_llm)
 
         self.hybrid_search = HybridRetriever(
         embedding_provider=self.embedding_provider,

@@ -1,7 +1,7 @@
 # app/retrieval/rrf.py
 from typing import List, Dict
 
-class RFF:
+class RRF:
      
     @staticmethod
     def _reciprocal_rank_fusion(dense_results: List[Dict], lexical_results: List[Dict], k: int = 60) -> List[Dict]:

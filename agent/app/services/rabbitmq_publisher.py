@@ -1,15 +1,14 @@
 # app/services/rabbitmq_publisher.py
 import json
 import aio_pika
-from langchain_core.messages import messages_to_dict
 from app.core.settings import settings
 from app.core.logger import setup_app_logger
 
 logger = setup_app_logger("RabbitMqPublisher")
 
-async def publish_extraction_task(user_id: str, session_id: str, target_rag_domain: str, messages: list):
+async def publish_extraction_task(user_id: str, session_id: str, target_rag_domain: str):
     """
-    Serializes conversation history payload and posts it along with its resolved domain routing tag.
+    Serializes conversation history reference payload and posts it along with its resolved domain routing tag.
     """
     try:
         connection = await aio_pika.connect_robust(settings.rabbitmq.url)
@@ -36,15 +35,12 @@ async def publish_extraction_task(user_id: str, session_id: str, target_rag_doma
                 arguments=queue_arguments
             )
             
-            messages_dict = messages_to_dict(messages)
-            
             # 🚀 Injected explicit target_rag_domain parameter inside the queue payload envelope
             payload = {
                 "codename_process": "FactExtractionProcess",
                 "user_id": user_id,
                 "session_id": session_id,
-                "target_rag_domain": target_rag_domain or "general_memory",
-                "messages": messages_dict
+                "target_rag_domain": target_rag_domain or "general_memory"
             }
             
             await channel.default_exchange.publish(

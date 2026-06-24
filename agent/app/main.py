@@ -10,7 +10,7 @@ from app.mcp.mcp_client import mcp_manager
 from app.api.router_registry import build_master_router
 from app.services.pruning_policy import run_pruning_policy
 from app.core.logger import setup_app_logger
-from bootstrap.startup import startup, shutdown
+from app.bootstrap.startup import startup, shutdown
 
 logger = setup_app_logger("MainApp")
 scheduler = AsyncIOScheduler()

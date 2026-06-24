@@ -1,3 +1,4 @@
+# docker-compose
 version: '3.8'
 
 services:
@@ -82,7 +83,7 @@ services:
     command: ["./entrypoint.sh", "python", "-m", "app.grpc_server"]
     ports:
       - "50051:50051" 
-      - "8001:8001"
+      - "8002:8001"
     volumes:
       - ./:/app
       - ${LOGS_DIR:-./logs}:/app/logs

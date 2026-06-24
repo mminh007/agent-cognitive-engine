@@ -2,7 +2,7 @@
 import asyncio
 import chromadb
 import os
-from agent.app.interfaces import VectorStore
+from app.interfaces import VectorStore
 from app.core.logger import setup_app_logger
 from app.core.settings import settings
 

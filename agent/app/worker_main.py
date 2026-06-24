@@ -4,10 +4,11 @@ import json
 import sys
 import aio_pika
 from app.core.settings import settings
-from langchain_core.messages import messages_from_dict
 from app.services import MemoryWorker
 from app.core.logger import setup_app_logger
-from bootstrap.container import container
+from app.bootstrap.container import container
+from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+from app.graph.workflow import compiled_graph
 
 logger = setup_app_logger("WorkerMainCore")
 
@@ -21,12 +22,21 @@ async def process_message(message: aio_pika.IncomingMessage):
             user_id = payload.get("user_id")
             session_id = payload.get("session_id")
             target_collection = payload.get("target_rag_domain", "general_memory")  # 🚀 Extract dynamic collection destination
-            raw_messages = payload.get("messages")
             codename = payload.get("codename_process")
             
             logger.info(f"==> [Worker Event] Processing Payload | Action: {codename} | Target Partition: {target_collection}")
             
-            messages = messages_from_dict(raw_messages)
+            # Retrieve source of truth from Redis checkpointer
+            async with AsyncRedisSaver(redis_url=settings.redis.url) as saver:
+                graph = compiled_graph.compile(checkpointer=saver)
+                config = {"configurable": {"thread_id": f"{user_id}_{session_id}"}}
+                state_snapshot = await graph.aget_state(config)
+                messages = state_snapshot.values.get("messages", [])
+
+            if not messages:
+                logger.warning(f"⚠️ [Worker] No conversation state found in DB for Session: {session_id}")
+                await message.ack()
+                return
             
             memory_worker = MemoryWorker(
                 memory_service= container.memory_service,

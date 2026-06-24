@@ -8,7 +8,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 
 from app.graph.state import AgentState
-from app.retrieval import HybridRetriever
+
 from app.services.query_transformer import transform_user_query
 
 # We now import a highly optimized O(1) tool retrieval function
@@ -196,9 +196,12 @@ async def node_general_agent(state: AgentState):
     user_id = state.get("user_id", "UNKNOWN_USER")
     current_domain = state.get("current_domain", "general_memory")
     
+    if not container.hybrid_search:
+        await container.initialize()
+    
     # Context injected strictly against the root query to prevent context drifting
     user_initial_prompt = state["messages"][0].content if state["messages"] else ""
-    context = await container.hybrid_search.retrieve(user_id, user_initial_prompt, collection_name=current_domain)
+    context = await container.hybrid_search.retrieve(user_id, user_initial_prompt, collection=current_domain)
     manifest = load_agent_manifest_instructions()
     
     # Explicit topology instructions guiding the LLM how to parse ToolMessages natively
@@ -228,8 +231,13 @@ async def node_general_agent(state: AgentState):
         settings.openai.tier2_balanced_model
     )
     
+    current_iteration = state.get("iteration_count", 0) + 1
+    
     response = await llm_with_tools.ainvoke(compiled_messages)
-    return {"messages": [response]}
+    return {
+        "messages": [response],
+        "iteration_count": current_iteration
+    }
 
 
 async def node_research_paper_agent(state: AgentState):
@@ -239,7 +247,10 @@ async def node_research_paper_agent(state: AgentState):
     """
     user_id = state.get("user_id", "UNKNOWN_USER")
     current_domain = state.get("current_domain", "research_papers")
-    hybird_search = HybridRetriever()
+
+    if not container.hybrid_search:
+        await container.initialize()
+
     
     # ─── WORKFLOW MEMORY INJECTION ───
     tasks = state.get("tasks", [])
@@ -252,7 +263,7 @@ async def node_research_paper_agent(state: AgentState):
     # Retrieve base RAG context
     user_initial_prompt = state["messages"][0].content if state["messages"] else ""
     optimized_query = await transform_user_query(user_initial_prompt)
-    rag_context = await hybird_search.retrieve(user_id, optimized_query, collection_name=current_domain)
+    rag_context = await container.hybrid_search.retrieve(user_id, optimized_query, collection=current_domain)
     
     # 🚀 REASONING & LOOP CONTROL PROMPT ENGINEERING
     system_content = (
@@ -296,9 +307,12 @@ async def node_vision_detection_agent(state: AgentState):
     """
     user_id = state.get("user_id", "UNKNOWN_USER")
     current_domain = state.get("current_domain", "vision_detection")
+    
+    if not container.hybrid_search:
+        await container.initialize()
     user_initial_prompt = state["messages"][0].content if state["messages"] else ""
     
-    context = await vector_db_service.retrieve_context(user_id, user_initial_prompt, collection_name=current_domain)
+    context = await container.hybrid_search.retrieve(user_id, user_initial_prompt, collection=current_domain)
     manifest = load_agent_manifest_instructions()
 
     system_content = (
@@ -320,8 +334,13 @@ async def node_vision_detection_agent(state: AgentState):
         settings.openai.tier1_fast_model
     )
     
+    current_iteration = state.get("iteration_count", 0) + 1
+    
     response = await llm_with_tools.ainvoke(compiled_messages)
-    return {"messages": [response]}
+    return {
+        "messages": [response],
+        "iteration_count": current_iteration
+    }
 
 
 # --- EVALUATION NODE --- 
@@ -343,7 +362,11 @@ async def node_critic_agent(state: AgentState):
         f"Critically analyze if the Executor fulfilled the objective. Expose missing data or hallucinated parameters."
     )
     
-    evaluation: CriticOutput = await structured_critic.ainvoke([HumanMessage(content=evaluation_prompt)])
+    try:
+        evaluation: CriticOutput = await structured_critic.ainvoke([HumanMessage(content=evaluation_prompt)])
+    except Exception as e:
+        logger.error(f"❌ [CRITIC FAILURE] Parse error: {str(e)}")
+        evaluation = CriticOutput(objective_met=True, feedback="[Fallback] Parsing failed, proceeding automatically.")
     
     logger.info(f"    Status: {'✅ MET' if evaluation.objective_met else '❌ DEFICIENT'}")
     logger.info(f"    Feedback: {evaluation.feedback}\n")
@@ -369,12 +392,19 @@ async def node_reflection_agent(state: AgentState):
         f"Determine if rework is absolutely required. If yes, generate strict instructions. If no, draft a synthesis memo."
     )
     
-    reflection: ReflectionOutput = await structured_reflection.ainvoke([HumanMessage(content=reflection_prompt)])
+    try:
+        reflection: ReflectionOutput = await structured_reflection.ainvoke([HumanMessage(content=reflection_prompt)])
+    except Exception as e:
+        logger.error(f"❌ [REFLECTION FAILURE] Parse error: {str(e)}")
+        reflection = ReflectionOutput(needs_rework=False, actionable_advice="[Fallback] Parsing failed, proceeding without rework.")
     
     logger.info(f"    Correction Required: {reflection.needs_rework}")
     logger.info(f"    Directive: {reflection.actionable_advice}\n")
     
-    return {"reflection_notes": reflection.actionable_advice}
+    return {
+        "reflection_notes": reflection.actionable_advice,
+        "needs_rework": reflection.needs_rework
+    }
 
 
 async def node_final_synthesizer(state: AgentState):
@@ -402,3 +432,40 @@ async def node_final_synthesizer(state: AgentState):
     logger.info(f"    Process Complete. Handshake ready.\n\n")
     
     return {"messages": [final_response]}
+
+async def node_task_manager(state: AgentState):
+    """
+    Node: TASK_MANAGER.
+    Manages iterating through Planner tasks. Marks current as complete, advances pointer.
+    """
+    logger.info(f"\n\n==> [Process: TASK_MANAGER] Auditing task registry...")
+    tasks = state.get("tasks", [])
+    current_task_id = state.get("current_task_id")
+    
+    if not tasks:
+        logger.info("    No tasks registered. Proceeding.")
+        return {"current_task_id": None}
+        
+    updated_tasks = []
+    for t in tasks:
+        if t["id"] == current_task_id:
+            t["status"] = "completed"
+        updated_tasks.append(t)
+        
+    next_task = next((t for t in updated_tasks if t.get("status") == "pending"), None)
+    
+    if next_task:
+        logger.info(f"    Advancing to Next Task -> [{next_task['id']}]: {next_task['desc']}")
+        # Reset counters for the new task
+        return {
+            "tasks": updated_tasks,
+            "current_task_id": next_task["id"],
+            "iteration_count": 0,
+            "tool_call_count": 0
+        }
+    else:
+        logger.info(f"    All tasks completed. Proceeding to synthesis.")
+        return {
+            "tasks": updated_tasks,
+            "current_task_id": None
+        }

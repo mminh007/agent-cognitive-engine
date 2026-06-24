@@ -24,4 +24,5 @@ class AgentState(TypedDict):
     # ─── EVALUATION MEMORY ───
     critic_feedback: Optional[str]
     reflection_notes: Optional[str]
+    needs_rework: Optional[bool]
     final_answer: Optional[str]

@@ -1,5 +1,5 @@
 # app/boostrap/startup.py
-from bootstrap.container import Container
+from app.bootstrap.container import Container
 
 container = Container()
 

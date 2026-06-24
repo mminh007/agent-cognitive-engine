@@ -12,6 +12,8 @@ from langchain_core.messages import HumanMessage
 from app.services.rabbitmq_publisher import publish_extraction_task
 from app.core.logger import setup_app_logger
 from app.graph.workflow import compiled_graph
+from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+from app.core.settings import settings
 from app.mcp.mcp_client import mcp_manager
 from app.bootstrap.startup import startup, shutdown
 
@@ -62,8 +64,11 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
         ai_full_response_text = ""
         resolved_routing_domain = "general_memory"
         
-        try:
-            async for event in self.graph.astream_events(initial_state, version="v2", config=trace_config):
+        is_anonymous = request.user_id.startswith("anon_")
+
+        async def run_stream(compiled_graph_instance):
+            nonlocal ai_full_response_text, final_state_messages, resolved_routing_domain
+            async for event in compiled_graph_instance.astream_events(initial_state, version="v2", config=trace_config):
                 if context.cancelled():
                     logger.info("==> [gRPC] Stream dropped by upstream proxy.")
                     break
@@ -86,17 +91,54 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
                     # 🚀 Intercept the terminal state domain configuration generated dynamically by the Supervisor
                     resolved_routing_domain = output_payload.get("current_domain", "general_memory")
 
+        try:
+            if is_anonymous:
+                graph = self.graph.compile()
+                async for chunk_response in run_stream(graph):
+                    yield chunk_response
+            else:
+                async with AsyncRedisSaver(redis_url=settings.redis.url) as saver:
+                    graph = self.graph.compile(checkpointer=saver)
+                    async for chunk_response in run_stream(graph):
+                        yield chunk_response
+
             # ─── ASYNCHRONOUS BACKGROUND LONG-TERM FACT EXTRACTION ORCHESTRATION ───
-            if final_state_messages:
+            if final_state_messages and not is_anonymous:
                 # 🚀 Pass the resolved dynamic routing tag down the message pipeline task definition
                 asyncio.create_task(
                     publish_extraction_task(
                         request.user_id, 
                         request.session_id, 
-                        resolved_routing_domain, 
-                        final_state_messages
+                        resolved_routing_domain
                     )
                 )
+
+            # ─── SECURE CRYPTOGRAPHIC AI RESPONSE RECEIPT GENERATION (SOLUTION A) ───
+            if ai_full_response_text:
+                import hashlib
+                import time
+                from app.core.asymmetric_helper import sign_data_es256
+
+                # Compute SHA-256 hash of the fully accumulated response text
+                response_hash = hashlib.sha256(ai_full_response_text.encode('utf-8')).hexdigest()
+                timestamp = int(time.time())
+
+                # Data pattern to sign: session_id + timestamp + response_hash
+                data_to_sign = f"{request.session_id}:{timestamp}:{response_hash}"
+                
+                # Sign the data
+                signature = sign_data_es256(data_to_sign, settings.security.ai_receipt_private_key)
+
+                # Yield the final message containing the Receipt envelope
+                receipt_msg = chat_pb2.Receipt(
+                    session_id=request.session_id,
+                    timestamp=timestamp,
+                    response_hash=response_hash,
+                    signature=signature,
+                    key_id="secp256r1-default-key"
+                )
+                yield chat_pb2.ChatResponse(chunk="", receipt=receipt_msg)
+                logger.info(f"==> [gRPC Receipt] Successfully generated and yielded AI Response Receipt for Session: {request.session_id}")
 
         except Exception as e:
             GRPC_ERRORS_TOTAL.inc()

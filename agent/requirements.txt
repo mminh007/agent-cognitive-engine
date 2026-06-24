@@ -49,3 +49,4 @@ grpcio-tools==1.81.1
 
 # MONITORING
 prometheus-client==0.20.0
+cryptography==42.0.5

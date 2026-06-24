@@ -5,8 +5,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 import app.core.logger as logger
-from app.api.deps import get_agent_graph
 from app.bootstrap.container import container
+from app.graph.workflow import compiled_graph
+from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+from app.core.settings import settings
 # Import Langfuse and LangSmith tracing utilities
 from langfuse.langchain import CallbackHandler
 from langchain_core.tracers import LangChainTracer
@@ -22,8 +24,7 @@ class ChatRequest(BaseModel):
 @router.post("/stream")
 async def chat_stream_endpoint(
     request: ChatRequest,
-    background_tasks: BackgroundTasks,
-    graph = Depends(get_agent_graph)
+    background_tasks: BackgroundTasks
 ):
     # Check semantic cache inside Vector DB to bypass LLM if hit
     cached_reply = await container.semantic_cache.get(request.prompt)
@@ -66,14 +67,17 @@ async def chat_stream_endpoint(
 
     SSE_ACTIVE_STREAMS.inc()
 
+    is_anonymous = request.user_id.startswith("anon_")
+
     async def event_generator():
         final_state_messages = []
         ai_full_response_text = ""
         resolved_domain = "general_memory"
         stream_completed_cleanly = False
         
-        try:
-            async for event in graph.astream_events(initial_state, version="v2", config=trace_config):
+        async def run_graph_stream(graph_instance):
+            nonlocal ai_full_response_text, final_state_messages, resolved_domain
+            async for event in graph_instance.astream_events(initial_state, version="v2", config=trace_config):
                 kind = event["event"]
                 
                 if kind == "on_chat_model_stream":
@@ -90,7 +94,41 @@ async def chat_stream_endpoint(
                     output_payload = event["data"]["output"]
                     final_state_messages = output_payload["messages"]
                     resolved_domain = output_payload.get("current_domain", "general_memory")
+
+        try:
+            if is_anonymous:
+                graph_run = compiled_graph.compile()
+                async for chunk in run_graph_stream(graph_run):
+                    yield chunk
+            else:
+                async with AsyncRedisSaver(redis_url=settings.redis.url) as saver:
+                    graph_run = compiled_graph.compile(checkpointer=saver)
+                    async for chunk in run_graph_stream(graph_run):
+                        yield chunk
             
+            # ─── SECURE CRYPTOGRAPHIC AI RESPONSE RECEIPT GENERATION ───
+            if ai_full_response_text:
+                import hashlib
+                import time
+                import json
+                from app.core.asymmetric_helper import sign_data_es256
+
+                response_hash = hashlib.sha256(ai_full_response_text.encode('utf-8')).hexdigest()
+                timestamp = int(time.time())
+                data_to_sign = f"{request.session_id}:{timestamp}:{response_hash}"
+                
+                signature = sign_data_es256(data_to_sign, settings.security.ai_receipt_private_key)
+                
+                receipt_json = {
+                    "type": "receipt",
+                    "session_id": request.session_id,
+                    "timestamp": timestamp,
+                    "response_hash": response_hash,
+                    "signature": signature,
+                    "key_id": "secp256r1-default-key"
+                }
+                yield f"data: {json.dumps(receipt_json)}\n\n"
+
             stream_completed_cleanly = True    
         finally:
             # 🚀 METRIC: Decrement active streams and evaluate connection termination health
@@ -106,16 +144,15 @@ async def chat_stream_endpoint(
 
         # Cache the completed response text if available
         if ai_full_response_text:
-            chroma_semantic_cache.set(request.prompt, ai_full_response_text)
+            await container.semantic_cache.set(request.prompt, ai_full_response_text)
 
         # Offload post-processing/extraction tasks asynchronously via RabbitMQ
-        if final_state_messages:
+        if final_state_messages and not is_anonymous:
             background_tasks.add_task(
                 publish_extraction_task,
                 request.user_id, 
                 request.session_id, 
-                resolved_domain, 
-                final_state_messages
+                resolved_domain
             )
 
     return StreamingResponse(event_generator(), media_type="text-event-stream")

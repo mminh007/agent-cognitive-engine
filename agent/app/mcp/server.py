@@ -1,10 +1,24 @@
 # app/mcp/server.py
 import sys
 import os
-from mcp.server.fastmcp import FastMCP
-
 # Ensure absolute imports resolve correctly across the project structure
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+# 🚀 Security Handshake Validation Layer (Solution A: HS256 JWT validation)
+from app.core.jwt_helper import verify_jwt
+client_token = os.environ.get("MCP_CLIENT_TOKEN")
+jwt_secret = os.environ.get("MCP_JWT_SECRET") or "default_mcp_jwt_secret_key_change_me_in_prod"
+
+if not client_token:
+    print("🚨 [Security Alert] Access Denied: Missing client authentication token.", file=sys.stderr)
+    sys.exit(1)
+
+payload = verify_jwt(client_token, jwt_secret)
+if not payload or payload.get("sub") != "mcp-client":
+    print("🚨 [Security Alert] Access Denied: Invalid or expired client authentication token.", file=sys.stderr)
+    sys.exit(1)
+
+from mcp.server.fastmcp import FastMCP
 
 from app.mcp.domains.core_tools import calculate_execution_time_logic
 from app.mcp.domains.web_tools import search_web_logic
