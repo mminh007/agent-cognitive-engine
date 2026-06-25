@@ -1,8 +1,7 @@
 # app/services/query_transformer.py
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from app.core.settings import settings
 from app.core.logger import setup_app_logger
+from app.graph.config import get_llm_instance
 
 logger = setup_app_logger("QueryTransformer")
 
@@ -11,17 +10,11 @@ transform_prompt = ChatPromptTemplate.from_messages([
     ("human", "Context: {context}\nLatest Message: {latest_message}")
 ])
 
-base_llm_kwargs = {
-    "api_key": settings.openai.api_key.get_secret_value() if settings.openai.api_key else None,
-    "base_url": settings.openai.base_url,
-    "streaming": True
-}
-
-# TIER 1: Fast & Cheap (Router)
-llm_tier1_fast = ChatOpenAI(model=settings.openai.tier1_fast_model, **base_llm_kwargs)
-
 async def transform_user_query(latest_message: str, history_summary: str = "") -> str:
     """Transform the user's latest message into an optimized search query."""
+    # TIER 1: Fast & Cheap (Router) dynamically loaded
+    llm_tier1_fast = get_llm_instance(tier=1)
+    
     chain = transform_prompt | llm_tier1_fast
     response = await chain.ainvoke({"context": history_summary, "latest_message": latest_message})
     optimized_query = str(response.content).strip().strip('"')

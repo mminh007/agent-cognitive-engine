@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nchat.proto\x12\x04\x63hat\"B\n\x0b\x43hatRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\"=\n\x0c\x43hatResponse\x12\r\n\x05\x63hunk\x18\x01 \x01(\t\x12\x1e\n\x07receipt\x18\x02 \x01(\x0b\x32\r.chat.Receipt\"j\n\x07Receipt\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x11\n\ttimestamp\x18\x02 \x01(\x03\x12\x15\n\rresponse_hash\x18\x03 \x01(\t\x12\x11\n\tsignature\x18\x04 \x01(\t\x12\x0e\n\x06key_id\x18\x05 \x01(\t2E\n\x0c\x41gentService\x12\x35\n\nStreamChat\x12\x11.chat.ChatRequest\x1a\x12.chat.ChatResponse0\x01\x42\x12\xaa\x02\x0f\x41gentApp.Protosb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\nchat.proto\x12\x04\x63hat\"B\n\x0b\x43hatRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x12\n\nsession_id\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\"=\n\x0c\x43hatResponse\x12\r\n\x05\x63hunk\x18\x01 \x01(\t\x12\x1e\n\x07receipt\x18\x02 \x01(\x0b\x32\r.chat.Receipt\"j\n\x07Receipt\x12\x12\n\nsession_id\x18\x01 \x01(\t\x12\x11\n\ttimestamp\x18\x02 \x01(\x03\x12\x15\n\rresponse_hash\x18\x03 \x01(\t\x12\x11\n\tsignature\x18\x04 \x01(\t\x12\x0e\n\x06key_id\x18\x05 \x01(\t\"\x98\x02\n\x15ProviderConfigRequest\x12\x0f\n\x07user_id\x18\x01 \x01(\t\x12\x19\n\x0cllm_provider\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x14\n\x07\x61pi_key\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x15\n\x08\x62\x61se_url\x18\x04 \x01(\tH\x02\x88\x01\x01\x12\x18\n\x0btier1_model\x18\x05 \x01(\tH\x03\x88\x01\x01\x12\x18\n\x0btier2_model\x18\x06 \x01(\tH\x04\x88\x01\x01\x12\x18\n\x0btier3_model\x18\x07 \x01(\tH\x05\x88\x01\x01\x42\x0f\n\r_llm_providerB\n\n\x08_api_keyB\x0b\n\t_base_urlB\x0e\n\x0c_tier1_modelB\x0e\n\x0c_tier2_modelB\x0e\n\x0c_tier3_model\":\n\x16ProviderConfigResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t2\x98\x01\n\x0c\x41gentService\x12\x35\n\nStreamChat\x12\x11.chat.ChatRequest\x1a\x12.chat.ChatResponse0\x01\x12Q\n\x14UpdateProviderConfig\x12\x1b.chat.ProviderConfigRequest\x1a\x1c.chat.ProviderConfigResponseB\x12\xaa\x02\x0f\x41gentApp.Protosb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -38,6 +38,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_CHATRESPONSE']._serialized_end=149
   _globals['_RECEIPT']._serialized_start=151
   _globals['_RECEIPT']._serialized_end=257
-  _globals['_AGENTSERVICE']._serialized_start=259
-  _globals['_AGENTSERVICE']._serialized_end=328
+  _globals['_PROVIDERCONFIGREQUEST']._serialized_start=260
+  _globals['_PROVIDERCONFIGREQUEST']._serialized_end=540
+  _globals['_PROVIDERCONFIGRESPONSE']._serialized_start=542
+  _globals['_PROVIDERCONFIGRESPONSE']._serialized_end=600
+  _globals['_AGENTSERVICE']._serialized_start=603
+  _globals['_AGENTSERVICE']._serialized_end=755
 # @@protoc_insertion_point(module_scope)

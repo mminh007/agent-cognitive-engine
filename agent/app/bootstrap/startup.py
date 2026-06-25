@@ -1,7 +1,5 @@
 # app/boostrap/startup.py
-from app.bootstrap.container import Container
-
-container = Container()
+from app.bootstrap.container import container
 
 async def startup():
     await container.initialize()

@@ -33,7 +33,7 @@ GRAPH_ITERATIONS = Histogram(
 FORCED_TERMINATION_TOTAL = Counter(
     'langgraph_forced_termination_total', 
     'Total occurrences where a procedural safeguard tripped and forced a hard termination',
-    ['domain', 'reason'] # e.g., "max_iterations", "max_budget", "duplicate_action"
+    ['domain', 'reason'] # e.g., "max_iterations", "budget_depleted", "duplicate_action", "max_rework_cycles"
 )
 
 DUPLICATE_TOOL_CALL_TOTAL = Counter(

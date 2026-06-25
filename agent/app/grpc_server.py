@@ -16,6 +16,7 @@ from langgraph.checkpoint.redis.aio import AsyncRedisSaver
 from app.core.settings import settings
 from app.mcp.mcp_client import mcp_manager
 from app.bootstrap.startup import startup, shutdown
+from app.bootstrap.container import container
 
 from prometheus_client import Gauge, Counter
 from prometheus_client import start_http_server
@@ -36,6 +37,38 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
     def __init__(self):
         self.graph = compiled_graph
 
+    async def UpdateProviderConfig(self, request: chat_pb2.ProviderConfigRequest, context: grpc.aio.ServicerContext):
+        logger.info(f"==> [gRPC] Received config update from User: {request.user_id}")
+        
+        if not container.redis_client:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details("Redis client not initialized.")
+            return chat_pb2.ProviderConfigResponse(success=False, message="Redis not initialized.")
+            
+        config_dict = {"user_id": request.user_id}
+        
+        if request.HasField("default"):
+            # User wants to use system default key for this provider
+            config_dict["llm_provider"] = request.default
+            config_dict["use_default_key"] = True
+        elif request.HasField("llm_provider"):
+            if not request.HasField("api_key"):
+                context.set_code(grpc.StatusCode.INVALID_ARGUMENT)
+                context.set_details("Custom provider requires an api_key.")
+                return chat_pb2.ProviderConfigResponse(success=False, message="Custom provider requires an api_key.")
+            config_dict["llm_provider"] = request.llm_provider
+            config_dict["api_key"] = request.api_key
+            config_dict["use_default_key"] = False
+        
+        import json
+        await container.redis_client.setex(
+            f"user_config:{request.user_id}",
+            86400,
+            json.dumps(config_dict)
+        )
+        
+        return chat_pb2.ProviderConfigResponse(success=True, message=f"Configuration saved for user {request.user_id}")
+
     async def StreamChat(self, request: chat_pb2.ChatRequest, context: grpc.aio.ServicerContext):
         logger.info(f"==> [gRPC] Received request from User: {request.user_id}, Session: {request.session_id}")
         
@@ -46,8 +79,37 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
             "messages": [HumanMessage(content=request.prompt)],
             "user_id": request.user_id,
             "session_id": request.session_id,
-            "current_domain": "general_memory" # Fallback seed value
+            "current_domain": "general_memory",  # Fallback seed; Supervisor will override
+            # ─── Supervisor routing metadata ───
+            "complexity": "medium",               # Default; Supervisor will override
+            "required_agents": [],
+            # ─── Loop safeguard counters ───
+            "iteration_count": 0,
+            "tool_call_count": 0,
+            "action_history": [],
+            "rework_count": 0,
+            # ─── Workflow memory ───
+            "tasks": [],
+            "current_task_id": None,
         }
+
+        # Extract dynamic configuration from gRPC headers/metadata
+        metadata = {k.lower(): v for k, v in context.invocation_metadata()}
+        llm_provider = metadata.get("x-llm-provider")
+        api_key = metadata.get("x-api-key")
+
+        # ─── FALLBACK TO DYNAMIC USER CONFIG FROM REDIS ───
+        if container.redis_client:
+            user_config_data = await container.redis_client.get(f"user_config:{request.user_id}")
+            if user_config_data:
+                try:
+                    import json
+                    user_config = json.loads(user_config_data)
+                    llm_provider = llm_provider or user_config.get("llm_provider")
+                    api_key = api_key or user_config.get("api_key")
+                    use_default_key = user_config.get("use_default_key", False)
+                except Exception as e:
+                    logger.error(f"Failed to parse user config from Redis: {e}")
 
         trace_config = {
             "metadata": {
@@ -56,7 +118,9 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
                 "source": "grpc"
             },
             "configurable": {
-                "thread_id": f"{request.user_id}_{request.session_id}" 
+                "thread_id": f"{request.user_id}_{request.session_id}",
+                "llm_provider": llm_provider,
+                "api_key": api_key if not use_default_key else None
             }
         }
 

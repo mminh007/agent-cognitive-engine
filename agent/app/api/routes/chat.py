@@ -16,6 +16,8 @@ from app.core.metrics import SSE_ACTIVE_STREAMS, SSE_DISCONNECT_TOTAL
 
 router = APIRouter(prefix="/chat", tags=["Agent Chat Ecosystem"])
 
+from typing import Optional
+
 class ChatRequest(BaseModel):
     user_id: str
     session_id: str
@@ -37,7 +39,18 @@ async def chat_stream_endpoint(
         "messages": [HumanMessage(content=request.prompt)],
         "user_id": request.user_id,
         "session_id": request.session_id,
-        "current_domain": "general_memory"
+        "current_domain": "general_memory",   # Fallback seed; Supervisor will override
+        # ─── Supervisor routing metadata ───
+        "complexity": "medium",                # Default; Supervisor will override
+        "required_agents": [],
+        # ─── Loop safeguard counters ───
+        "iteration_count": 0,
+        "tool_call_count": 0,
+        "action_history": [],
+        "rework_count": 0,
+        # ─── Workflow memory ───
+        "tasks": [],
+        "current_task_id": None,
     }
     
     # 🚀 OPTIMIZATION 1: Pass session_id and user_id directly to Langfuse
@@ -49,19 +62,32 @@ async def chat_stream_endpoint(
     
     langsmith_tracer = LangChainTracer(project_name="agent-ecosystem-prod")
 
+    # ─── LOAD USER PROVIDER CONFIG FROM REDIS ───
+    user_config = {}
+    if container.redis_client:
+        user_config_data = await container.redis_client.get(f"user_config:{request.user_id}")
+        if user_config_data:
+            try:
+                import json
+                user_config = json.loads(user_config_data)
+            except Exception as e:
+                logger.error(f"Failed to parse user config from Redis: {e}")
+
     # 🚀 OPTIMIZATION & FINOPS TRACKING:
     # Inject business classification metadata directly into the root trace span.
-    # Langfuse will automatically aggregate tokens/cost grouped by these keys.
     trace_config = {
         "callbacks": [langfuse_handler, langsmith_tracer],
         "metadata": {
             "session_id": request.session_id, 
             "user_id": request.user_id,
-            "business_process_codename": "Realtime_Chat_Resolution", # 🚀 For Cost per Business Transaction
+            "business_process_codename": "Realtime_Chat_Resolution",
             "client_tier": "Standard" 
         },
         "configurable": {
-            "thread_id": f"{request.user_id}_{request.session_id}"
+            "thread_id": f"{request.user_id}_{request.session_id}",
+            # Only provider + api_key. Model tiers resolved from settings.py.
+            "llm_provider": user_config.get("llm_provider"),
+            "api_key": user_config.get("api_key") if not user_config.get("use_default_key") else None
         }
     }
 

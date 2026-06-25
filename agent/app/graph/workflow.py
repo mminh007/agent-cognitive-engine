@@ -12,11 +12,15 @@ from app.graph.nodes import (
     node_research_paper_agent, 
     node_vision_detection_agent,
     node_planner_agent,
+    node_direct_executor_init,
     node_critic_agent,
     node_final_synthesizer,
     node_reflection_agent,
-    node_task_manager
+    node_task_manager,
+    ExecutorOutput
 )
+from langchain_core.messages import HumanMessage
+from langchain_core.output_parsers import JsonOutputParser
 from app.mcp.mcp_client import get_mcp_tools
 from app.core.logger import setup_app_logger
 from app.core.metrics import FORCED_TERMINATION_TOTAL, DUPLICATE_TOOL_CALL_TOTAL, GRAPH_ITERATIONS
@@ -34,21 +38,55 @@ workflow.add_node("general_memory", node_general_agent)
 workflow.add_node("research_papers", node_research_paper_agent)
 workflow.add_node("vision_detection", node_vision_detection_agent)
 workflow.add_node("planner", node_planner_agent)
+workflow.add_node("direct_executor_init", node_direct_executor_init)  # Low-complexity bypass
 workflow.add_node("critic_agent", node_critic_agent)
 workflow.add_node("reflection_agent", node_reflection_agent)
 workflow.add_node("task_manager", node_task_manager)
 workflow.add_node("final_synthesizer", node_final_synthesizer)
 
+async def node_self_correct(state: AgentState):
+    """Injects a self-correction prompt when confidence is too low."""
+    logger.info("==> [Self-Correct] Confidence < 0.6. Forcing executor to rethink.")
+    return {"messages": [HumanMessage(content="Your last output had low confidence (< 0.6). Please use tools to gather more solid evidence before answering.")]}
+
+workflow.add_node("self_correct", node_self_correct)
+
 # Enforce entry points through the Intent Supervisor
 workflow.set_entry_point("supervisor_router")
 
-# ─── PHASE 1: ROUTING & PLANNING ───
-# Supervisor always dictates the objective and delegates to Planner
-workflow.add_edge("supervisor_router", "planner")
+# ─── PHASE 1: COMPLEXITY-AWARE ROUTING ───
+# Low complexity: bypass Planner → direct_executor_init → domain executor
+# Medium/High complexity: Supervisor → Planner → domain executor
+def route_from_supervisor(state: AgentState) -> str:
+    """
+    Complexity-aware routing gate after Supervisor.
+    'low' complexity skips Planner entirely to save LLM cost.
+    'medium' / 'high' route through full Planner decomposition.
+    """
+    complexity = state.get("complexity", "medium")
+    if complexity == "low":
+        logger.info(f"==> [Router] Complexity=LOW — bypassing Planner, routing to direct_executor_init.")
+        return "direct_executor_init"
+    logger.info(f"==> [Router] Complexity={complexity.upper()} — routing to Planner for decomposition.")
+    return "planner"
+
+workflow.add_conditional_edges(
+    "supervisor_router",
+    route_from_supervisor,
+    {
+        "direct_executor_init": "direct_executor_init",
+        "planner": "planner"
+    }
+)
 
 def route_from_planner(state: AgentState) -> str:
     """Delegates the planned tasks to the appropriate specific execution lane."""
-    target_destination = state.get("current_domain", "general_memory")
+    tasks = state.get("tasks", [])
+    if tasks:
+        target_destination = tasks[0].get("target_agent", state.get("current_domain", "general_memory"))
+    else:
+        target_destination = state.get("current_domain", "general_memory")
+        
     if target_destination in ["general_memory", "research_papers", "vision_detection"]:
         return target_destination
     return "general_memory"
@@ -63,10 +101,22 @@ workflow.add_conditional_edges(
     }
 )
 
+# direct_executor_init routes to the same domain lanes as Planner
+workflow.add_conditional_edges(
+    "direct_executor_init",
+    route_from_planner,   # Reuse same domain-routing logic
+    {
+        "general_memory": "general_memory",
+        "research_papers": "research_papers",
+        "vision_detection": "vision_detection"
+    }
+)
+
 
 # ─── PHASE 2: CONFIGURABLE HARD LIMITS ───
-MAX_ITERATIONS = 8        # Prevent infinite Thought/Action loops
-MAX_TOOL_CALLS = 10       # Prevent budget drain
+MAX_ITERATIONS   = 8    # Prevent infinite Thought/Action loops within a single task
+MAX_TOOL_CALLS   = 10   # Prevent budget drain across the execution lifecycle
+MAX_REWORK_CYCLES = 2   # Cap Critic→Reflection→Executor rework loops per task
 
 def generate_tool_hash(tool_name: str, args: dict) -> str:
     """Creates a unique deterministic hash for a tool call to detect exact duplicates."""
@@ -83,6 +133,19 @@ def evaluate_tool_hooks(state: AgentState) -> str:
     domain = state.get("current_domain", "general_memory")
     
     if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
+        try:
+            parser = JsonOutputParser(pydantic_object=ExecutorOutput)
+            parsed_payload = parser.parse(last_message.content)
+            findings = parsed_payload.get("findings", [])
+            if findings:
+                total_conf = sum(f.get("confidence", 0.0) if isinstance(f, dict) else getattr(f, "confidence", 0.0) for f in findings)
+                avg_conf = total_conf / len(findings)
+                if avg_conf < 0.6:
+                    logger.warning(f"🛑 [Fast-Fail] Session {session_id}: Avg Confidence {avg_conf:.2f} < 0.6. Self-Correcting without Critic.")
+                    return "self_correct"
+        except Exception as e:
+            pass # Let critic handle formatting or empty findings errors
+            
         return "critic_agent"
 
     # 1. MAX ITERATION & BUDGET SAFEGUARD
@@ -136,7 +199,7 @@ workflow.add_node("action_tracker", action_tracker_node)
 workflow.add_node("tools", tool_node)
 
 # Bind tool validation endpoints across all worker components
-executor_map = {"execute_tools": "action_tracker", "critic_agent": "critic_agent"}
+executor_map = {"execute_tools": "action_tracker", "critic_agent": "critic_agent", "self_correct": "self_correct"}
 workflow.add_conditional_edges("general_memory", evaluate_tool_hooks, executor_map)
 workflow.add_conditional_edges("research_papers", evaluate_tool_hooks, executor_map)
 workflow.add_conditional_edges("vision_detection", evaluate_tool_hooks, executor_map)
@@ -164,11 +227,36 @@ workflow.add_conditional_edges(
     }
 )
 
+workflow.add_conditional_edges(
+    "self_correct",
+    route_back_to_agent,
+    {
+        "general_memory": "general_memory",
+        "research_papers": "research_papers",
+        "vision_detection": "vision_detection"
+    }
+)
+
 # ─── PHASE 3: EVALUATION & SYNTHESIS PIPELINE ───
 workflow.add_edge("critic_agent", "reflection_agent")
 
 def route_from_reflection(state: AgentState) -> str:
+    """
+    Bounded rework gate: if Reflection demands rework but the rework counter
+    has already hit MAX_REWORK_CYCLES, force-advance to task_manager instead
+    of looping back to the executor indefinitely.
+    """
     if state.get("needs_rework"):
+        rework_count = state.get("rework_count", 0)
+        if rework_count >= MAX_REWORK_CYCLES:
+            domain = state.get("current_domain", "general_memory")
+            logger.warning(
+                f"🛑 [Rework Safeguard] Max rework cycles ({MAX_REWORK_CYCLES}) reached "
+                f"for domain '{domain}'. Force-advancing to task_manager."
+            )
+            FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="max_rework_cycles").inc()
+            return "task_manager"
+        
         domain = state.get("current_domain", "general_memory")
         if domain in ["general_memory", "research_papers", "vision_detection"]:
             return domain
@@ -187,7 +275,14 @@ workflow.add_conditional_edges(
 )
 
 def route_from_task_manager(state: AgentState) -> str:
-    if state.get("current_task_id") is not None:
+    current_task_id = state.get("current_task_id")
+    if current_task_id is not None:
+        tasks = state.get("tasks", [])
+        for t in tasks:
+            if t.get("id") == current_task_id:
+                domain = t.get("target_agent", state.get("current_domain", "general_memory"))
+                if domain in ["general_memory", "research_papers", "vision_detection"]:
+                    return domain
         domain = state.get("current_domain", "general_memory")
         if domain in ["general_memory", "research_papers", "vision_detection"]:
             return domain

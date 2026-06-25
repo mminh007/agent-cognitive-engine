@@ -40,6 +40,11 @@ class AgentServiceStub:
                 request_serializer=chat__pb2.ChatRequest.SerializeToString,
                 response_deserializer=chat__pb2.ChatResponse.FromString,
                 _registered_method=True)
+        self.UpdateProviderConfig = channel.unary_unary(
+                '/chat.AgentService/UpdateProviderConfig',
+                request_serializer=chat__pb2.ProviderConfigRequest.SerializeToString,
+                response_deserializer=chat__pb2.ProviderConfigResponse.FromString,
+                _registered_method=True)
 
 
 class AgentServiceServicer:
@@ -53,6 +58,13 @@ class AgentServiceServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def UpdateProviderConfig(self, request, context):
+        """Hàm nhận cập nhật cấu hình Provider từ user
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_AgentServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -60,6 +72,11 @@ def add_AgentServiceServicer_to_server(servicer, server):
                     servicer.StreamChat,
                     request_deserializer=chat__pb2.ChatRequest.FromString,
                     response_serializer=chat__pb2.ChatResponse.SerializeToString,
+            ),
+            'UpdateProviderConfig': grpc.unary_unary_rpc_method_handler(
+                    servicer.UpdateProviderConfig,
+                    request_deserializer=chat__pb2.ProviderConfigRequest.FromString,
+                    response_serializer=chat__pb2.ProviderConfigResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -90,6 +107,33 @@ class AgentService:
             '/chat.AgentService/StreamChat',
             chat__pb2.ChatRequest.SerializeToString,
             chat__pb2.ChatResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UpdateProviderConfig(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/chat.AgentService/UpdateProviderConfig',
+            chat__pb2.ProviderConfigRequest.SerializeToString,
+            chat__pb2.ProviderConfigResponse.FromString,
             options,
             channel_credentials,
             insecure,
