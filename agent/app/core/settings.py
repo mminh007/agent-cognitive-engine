@@ -21,33 +21,6 @@ class OpenAISettings(BaseSettings):
     max_completion_tokens: int = 1024  
     max_context_tokens: int = 8192
 
-class GeminiSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="GEMINI_", extra="ignore")
-    
-    # Google AI Studio API Key (AIzaSy...)
-    api_key: SecretStr | None = None
-    
-    # Use native Google GenAI SDK by default (far more stable for LangGraph than OpenAI wrapper)
-    base_url: str | None = None
-    
-    # ─── LLM TIER CONFIGURATION ───
-    # Tier 1: High-speed, ultra-low cost. Perfect for supervisor routing and fast text/vision classifications.
-    tier1_fast_model: str = "gemini-2.0-flash"
-    
-    # Tier 2: Balanced cost/performance. Used for core software engineering loops (general_memory) and prompt-parsed JSON.
-    tier2_balanced_model: str = "gemini-2.0-flash" # Can upgrade to "gemini-1.5-pro" if you hit Tier 1 rate limits or need higher analytical depth
-    
-    # Tier 3: High-reasoning. Reserved for deep academic research (research_papers) with extensive context windows.
-    tier3_reasoning_model: str = "gemini-2.0-pro"
-    
-    # ─── EMBEDDING MODEL ───
-    embedding_model: str = "models/text-embedding-004"
-    
-    # ─── TOKEN GOVERNANCE ───
-    # Gemini models support huge token outputs and context windows.
-    max_completion_tokens: int = 2048   # Expanded slightly as Gemini handles verbose output well
-    max_context_tokens: int = 32768     # Gemini's native context is up to 1M-2M tokens, but 32k is a very safe & fast buffer for your pruning logic
-
 
 class ClaudeSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="CLAUDE_", extra="ignore")
@@ -71,45 +44,18 @@ class ClaudeSettings(BaseSettings):
     max_completion_tokens: int = 1024
     max_context_tokens: int = 8192
 
-class LlamaSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="LLAMA_", extra="ignore")
-    api_key: SecretStr | None = None
-    base_url: str = "https://models.inference.ai.azure.com"
-    
-    tier1_fast_model: str = "Llama-3.1-8B-Instruct"
-    tier2_balanced_model: str = "Llama-3.1-70B-Instruct"
-    tier3_reasoning_model: str = "Llama-3.1-405B-Instruct"
-    
-    max_completion_tokens: int = 2048
-    max_context_tokens: int = 8192
-
-# ─── DEEPSEEK PROVIDER SETTINGS ───
-class DeepSeekSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="DEEPSEEK_", extra="ignore")
-    api_key: SecretStr | None = None
-    base_url: str = "https://models.inference.ai.azure.com"
-    
-    tier1_fast_model: str = "DeepSeek-R1"
-    tier2_balanced_model: str = "DeepSeek-R1"
-    tier3_reasoning_model: str = "DeepSeek-R1"
-    
-    max_completion_tokens: int = 4096
-    max_context_tokens: int = 16384
-
 # Redis configuration for short-term memory management and session state caching
 class RedisSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="REDIS_", extra="ignore")
     url: str = "redis://localhost:6379/0"
     ttl: int = 3600
 
-# ChromaDB configuration for vector storage management
-class ChromaSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="CHROMA_", extra="ignore")
-    path: str = "./chroma_db"
+# Qdrant configuration for vector storage management
+class QdrantSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_prefix="QDRANT_", extra="ignore")
     collection_name: str = "long_term_memory"
-    embedding_model: str = "text-embedding-3-small"
     server_host: str = "localhost"
-    server_port: str = "8000"
+    server_port: str = "6333"
 
 # RabbitMQ configuration for potential future message queue integrations (search for "RabbitMQSettings" in the codebase for usage contexts)
 class RabbitMQSettings(BaseSettings):
@@ -127,7 +73,7 @@ class TavilySettings(BaseSettings):
 class LogsSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="LOGS_", extra="ignore")
     dir: str = "./logs"
-    max_bytes: int = 10485760
+    max_bytes: int = 5242880
     backup_count: int = 5
 
 # MCP configuration for securing tool execution
@@ -157,16 +103,18 @@ class SecuritySettings(BaseSettings):
     )
 
 class Settings(BaseSettings):
-    """Unified application configuration manager grouping domain-specific sub-models."""
+    """Unified application configuration manager grouping domain-specific sub-models.
+    
+    Supported LLM providers: OpenAI and Anthropic (Claude) only.
+    These providers offer native Function Calling with the highest reliability
+    for structured output schemas used throughout the agent graph.
+    """
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
     
     openai: OpenAISettings = Field(default_factory=OpenAISettings)
-    gemini: GeminiSettings = Field(default_factory=GeminiSettings)
     claude: ClaudeSettings = Field(default_factory=ClaudeSettings)
-    llama: LlamaSettings = Field(default_factory=LlamaSettings)
-    deepseek: DeepSeekSettings = Field(default_factory=DeepSeekSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
-    chroma: ChromaSettings = Field(default_factory=ChromaSettings)
+    qdrant: QdrantSettings = Field(default_factory=QdrantSettings)
     rabbitmq: RabbitMQSettings = Field(default_factory=RabbitMQSettings)
     logs: LogsSettings = Field(default_factory=LogsSettings)
     tavily: TavilySettings = Field(default_factory=TavilySettings)

@@ -25,6 +25,17 @@ class VectorStore(ABC):
         pass
 
     @abstractmethod
+    async def hybrid_search(
+        self,
+        collection_name: str,   
+        query_text: str,
+        dense_embedding: list[float],
+        top_k: int,
+        filters: dict | None = None
+    ):
+        pass
+
+    @abstractmethod
     async def delete(
         self,
         collection_name: str,       

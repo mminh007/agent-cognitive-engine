@@ -72,6 +72,13 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
     async def StreamChat(self, request: chat_pb2.ChatRequest, context: grpc.aio.ServicerContext):
         logger.info(f"==> [gRPC] Received request from User: {request.user_id}, Session: {request.session_id}")
         
+        # 🚀 OPTIMIZATION: Check semantic cache inside Vector DB to bypass LLM if hit
+        cached_reply = await container.semantic_cache.get(request.prompt)
+        if cached_reply:
+            logger.info(f"==> [gRPC] Cache hit for User: {request.user_id}")
+            yield chat_pb2.ChatResponse(chunk=cached_reply)
+            return
+        
         # 🚀 METRIC: Increment active stream gauge
         GRPC_ACTIVE_STREAMS.inc()
 
@@ -97,6 +104,10 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
         metadata = {k.lower(): v for k, v in context.invocation_metadata()}
         llm_provider = metadata.get("x-llm-provider")
         api_key = metadata.get("x-api-key")
+        base_url = metadata.get("x-base-url")
+        tier1_model = metadata.get("x-tier1-model")
+        tier2_model = metadata.get("x-tier2-model")
+        tier3_model = metadata.get("x-tier3-model")
 
         # ─── FALLBACK TO DYNAMIC USER CONFIG FROM REDIS ───
         if container.redis_client:
@@ -176,6 +187,10 @@ class AgentServiceServicer(chat_pb2_grpc.AgentServiceServicer):
                         resolved_routing_domain
                     )
                 )
+
+            # 🚀 Cache the completed response text if available
+            if ai_full_response_text:
+                await container.semantic_cache.set(request.prompt, ai_full_response_text)
 
             # ─── SECURE CRYPTOGRAPHIC AI RESPONSE RECEIPT GENERATION (SOLUTION A) ───
             if ai_full_response_text:

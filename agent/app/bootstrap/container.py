@@ -1,11 +1,11 @@
 # app/bootstrap/container.py
 from app.infrastructure.embedding_provider import EmbeddingProvider
-from app.infrastructure.chroma import ChromaMemoryStore, ChromaSemanticCache, ChromaVectorStore
+from app.infrastructure.qdrant import QdrantMemoryStore, QdrantSemanticCache, QdrantVectorStore
 from app.services import MemoryService, MemoryWorker
 from app.services import FactExtractor
-from app.retrieval import HybridRetriever, BM25Retriever
+from app.retrieval import HybridRetriever
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from app.core.settings import settings
 from app.core.logger import setup_app_logger
 import redis.asyncio as redis_async
@@ -16,39 +16,39 @@ logger = setup_app_logger("Container")
 def _resolve_default_provider() -> str:
     """
     Determine the system-level default provider based on which API key
-    is configured in .env. Priority: gemini → llama → deepseek → openai.
-    Claude has no embedding API, so it cannot be the system default for infrastructure.
+    is configured in .env. Priority: openai -> claude.
+    Note: Claude has no native embedding API, so OpenAI is used for embeddings.
     """
-    if settings.gemini.api_key:
-        return "gemini"
-    elif settings.llama.api_key:
-        return "llama"
-    elif settings.deepseek.api_key:
-        return "deepseek"
-    return "openai"
+    if settings.openai.api_key:
+        return "openai"
+    return "claude"
+
+
+def _resolve_cache_model_version(provider: str) -> str:
+    """
+    Derive a stable, human-readable version tag from the active LLM model name.
+    This tag is embedded into every cached entry so that upgrading the LLM model
+    automatically bypasses all stale cache entries — zero manual invalidation.
+    """
+    if provider == "claude":
+        return settings.claude.tier2_balanced_model
+    return settings.openai.tier2_balanced_model
 
 
 def _resolve_default_embedding(provider: str):
     """
-    Create the embedding model instance based on the system default provider.
+    Create the embedding model instance.
+    Since only OpenAI embeddings are supported in the current stack, 
+    this always returns OpenAIEmbeddings regardless of the provider.
     Embedding MUST remain fixed per deployment to keep vector spaces compatible.
     """
-    if provider == "gemini":
-        api_key = settings.gemini.api_key.get_secret_value() if settings.gemini.api_key else None
-        logger.info(f"==> [Container] Using Gemini embedding model: {settings.gemini.embedding_model}")
-        return GoogleGenerativeAIEmbeddings(
-            model=settings.gemini.embedding_model,
-            google_api_key=api_key
-        )
-    else:
-        # Fallback to OpenAI embedding for openai, claude, llama, deepseek
-        api_key = settings.openai.api_key.get_secret_value() if settings.openai.api_key else None
-        logger.info(f"==> [Container] Using OpenAI embedding model: {settings.chroma.embedding_model}")
-        return OpenAIEmbeddings(
-            model=settings.chroma.embedding_model,
-            openai_api_key=api_key,
-            base_url=settings.openai.base_url
-        )
+    api_key = settings.openai.api_key.get_secret_value() if settings.openai.api_key else None
+    logger.info(f"==> [Container] Using OpenAI embedding model")
+    return OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        openai_api_key=api_key,
+        base_url=settings.openai.base_url
+    )
 
 
 def _resolve_default_memory_llm(provider: str):
@@ -56,36 +56,13 @@ def _resolve_default_memory_llm(provider: str):
     Create the memory LLM instance (used by FactExtractor) based on
     the system default provider. This is a background job, not per-user.
     """
-    if provider == "gemini":
-        api_key = settings.gemini.api_key.get_secret_value() if settings.gemini.api_key else None
-        base_url = settings.gemini.base_url
-        model = settings.gemini.tier1_fast_model
-        logger.info(f"==> [Container] Using Gemini memory LLM: {model}")
-        if base_url and "openai" in base_url:
-            return ChatOpenAI(
-                model=model, temperature=0,
-                api_key=api_key, base_url=base_url
-            )
-        else:
-            return ChatGoogleGenerativeAI(
-                model=model, temperature=0,
-                google_api_key=api_key
-            )
-    elif provider == "llama":
-        api_key = settings.llama.api_key.get_secret_value() if settings.llama.api_key else None
-        model = settings.llama.tier1_fast_model
-        logger.info(f"==> [Container] Using Llama memory LLM: {model}")
-        return ChatOpenAI(
+    if provider == "claude":
+        api_key = settings.claude.api_key.get_secret_value() if settings.claude.api_key else None
+        model = settings.claude.tier1_fast_model
+        logger.info(f"==> [Container] Using Claude memory LLM: {model}")
+        return ChatAnthropic(
             model=model, temperature=0,
-            api_key=api_key, base_url=settings.llama.base_url
-        )
-    elif provider == "deepseek":
-        api_key = settings.deepseek.api_key.get_secret_value() if settings.deepseek.api_key else None
-        model = settings.deepseek.tier1_fast_model
-        logger.info(f"==> [Container] Using DeepSeek memory LLM: {model}")
-        return ChatOpenAI(
-            model=model, temperature=0,
-            api_key=api_key, base_url=settings.deepseek.base_url
+            api_key=api_key
         )
     else:
         api_key = settings.openai.api_key.get_secret_value() if settings.openai.api_key else None
@@ -127,14 +104,23 @@ class Container:
 
         self.embedding_provider = EmbeddingProvider(embedding_model)
 
-        self.vector_store = ChromaVectorStore()
+        self.vector_store = QdrantVectorStore()
 
-        self.memory_store = ChromaMemoryStore(
+        self.memory_store = QdrantMemoryStore(
             vector_store=self.vector_store,
             embedding_provider=self.embedding_provider
         )
 
-        self.semantic_cache = ChromaSemanticCache(self.vector_store, self.embedding_provider)
+        # ─── Derive LLM model version for semantic cache versioning ───
+        # Changing the LLM in .env automatically invalidates stale cache entries.
+        cache_model_version = _resolve_cache_model_version(default_provider)
+        logger.info(f"==> [Container] Semantic cache version anchor: '{cache_model_version}'")
+
+        self.semantic_cache = QdrantSemanticCache(
+            self.vector_store,
+            self.embedding_provider,
+            model_version=cache_model_version
+        )
 
         self.memory_service = MemoryService(self.memory_store)
 
@@ -147,8 +133,7 @@ class Container:
 
         self.hybrid_search = HybridRetriever(
             embedding_provider=self.embedding_provider,
-            vector_store=self.vector_store,
-            bm25_retriever=BM25Retriever()
+            vector_store=self.vector_store
         )
 
     async def shutdown(self):

@@ -1,5 +1,6 @@
 from app.interfaces import EmbeddingProvider
 from langchain_core.embeddings import Embeddings
+from app.core.settings import settings
 
 class EmbeddingProvider(EmbeddingProvider):
     def __init__(self, embedding_model: Embeddings):

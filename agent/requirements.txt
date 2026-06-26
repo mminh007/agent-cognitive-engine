@@ -34,7 +34,8 @@ langsmith==0.8.15
 # ====================================================
 # VECTOR DB / MEMORY / UTILITIES / QUEUE / SEARCH
 # ====================================================
-chromadb==0.5.15
+qdrant-client==1.10.0
+fastembed==0.3.3
 redis==5.2.1
 requests==2.34.2
 httpx==0.28.1
@@ -42,7 +43,7 @@ pyyaml==6.0.3
 tiktoken==0.13.0
 aio-pika==9.6.2
 elasticsearch==9.4.1
-rank-bm25==0.2.2
+
 tavily-python==0.7.26
 apscheduler==3.11.2
 grpcio==1.81.1

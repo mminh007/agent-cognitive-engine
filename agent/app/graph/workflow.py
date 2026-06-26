@@ -17,10 +17,9 @@ from app.graph.nodes import (
     node_final_synthesizer,
     node_reflection_agent,
     node_task_manager,
-    ExecutorOutput
+    node_finding_extractor,
 )
 from langchain_core.messages import HumanMessage
-from langchain_core.output_parsers import JsonOutputParser
 from app.mcp.mcp_client import get_mcp_tools
 from app.core.logger import setup_app_logger
 from app.core.metrics import FORCED_TERMINATION_TOTAL, DUPLICATE_TOOL_CALL_TOTAL, GRAPH_ITERATIONS
@@ -42,14 +41,8 @@ workflow.add_node("direct_executor_init", node_direct_executor_init)  # Low-comp
 workflow.add_node("critic_agent", node_critic_agent)
 workflow.add_node("reflection_agent", node_reflection_agent)
 workflow.add_node("task_manager", node_task_manager)
+workflow.add_node("finding_extractor", node_finding_extractor)  # Content/Extraction separation
 workflow.add_node("final_synthesizer", node_final_synthesizer)
-
-async def node_self_correct(state: AgentState):
-    """Injects a self-correction prompt when confidence is too low."""
-    logger.info("==> [Self-Correct] Confidence < 0.6. Forcing executor to rethink.")
-    return {"messages": [HumanMessage(content="Your last output had low confidence (< 0.6). Please use tools to gather more solid evidence before answering.")]}
-
-workflow.add_node("self_correct", node_self_correct)
 
 # Enforce entry points through the Intent Supervisor
 workflow.set_entry_point("supervisor_router")
@@ -127,37 +120,30 @@ def evaluate_tool_hooks(state: AgentState) -> str:
     """
     Detects active tool calls while enforcing strict programmatic safeguards:
     Max Iterations, Budget Limits, and Duplicate Detection.
+
+    REFACTORED: Removed the fragile JSON confidence check that parsed executor
+    output as ExecutorOutput JSON. Executor nodes now return plain Markdown;
+    structured extraction is handled by node_finding_extractor. When no tool
+    calls are detected, routes to 'finding_extractor' (not 'critic_agent' directly).
     """
     last_message = state["messages"][-1]
     session_id = state.get("session_id", "UNKNOWN_SESSION")
     domain = state.get("current_domain", "general_memory")
     
     if not hasattr(last_message, "tool_calls") or not last_message.tool_calls:
-        try:
-            parser = JsonOutputParser(pydantic_object=ExecutorOutput)
-            parsed_payload = parser.parse(last_message.content)
-            findings = parsed_payload.get("findings", [])
-            if findings:
-                total_conf = sum(f.get("confidence", 0.0) if isinstance(f, dict) else getattr(f, "confidence", 0.0) for f in findings)
-                avg_conf = total_conf / len(findings)
-                if avg_conf < 0.6:
-                    logger.warning(f"🛑 [Fast-Fail] Session {session_id}: Avg Confidence {avg_conf:.2f} < 0.6. Self-Correcting without Critic.")
-                    return "self_correct"
-        except Exception as e:
-            pass # Let critic handle formatting or empty findings errors
-            
-        return "critic_agent"
+        # Executor is done — route to finding extractor before critic evaluation
+        return "finding_extractor"
 
     # 1. MAX ITERATION & BUDGET SAFEGUARD
     if state.get("iteration_count", 0) >= MAX_ITERATIONS:
         logger.warning(f"🛑 [Safeguard Tripped] Session {session_id}: Max loops reached. Forcing termination.\n")
-        FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="max_iterations").inc() # 🚀 METRIC
-        return "critic_agent"
+        FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="max_iterations").inc()
+        return "finding_extractor"  # Force extraction before critic
     
     if state.get("tool_call_count", 0) >= MAX_TOOL_CALLS:
         logger.warning(f"🛑 [Safeguard Tripped] Session {session_id}: Max tools budget reached. Forcing termination.\n")
-        FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="budget_depleted").inc() # 🚀 METRIC
-        return "critic_agent"
+        FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="budget_depleted").inc()
+        return "finding_extractor"
 
     action_history = state.get("action_history", [])
     
@@ -166,9 +152,9 @@ def evaluate_tool_hooks(state: AgentState) -> str:
         t_hash = generate_tool_hash(tool_call['name'], tool_call['args'])
         if t_hash in action_history:
             logger.warning(f"🛑 [Duplicate Detection] Blocked redundant tool call: {tool_call['name']}\n")
-            DUPLICATE_TOOL_CALL_TOTAL.labels(tool_name=tool_call['name']).inc() # 🚀 METRIC
-            FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="duplicate_action").inc() # 🚀 METRIC
-            return "critic_agent"
+            DUPLICATE_TOOL_CALL_TOTAL.labels(tool_name=tool_call['name']).inc()
+            FORCED_TERMINATION_TOTAL.labels(domain=domain, reason="duplicate_action").inc()
+            return "finding_extractor"
             
     tool_names = [t['name'] for t in last_message.tool_calls]
     logger.info(f"==> [Tool Action Dispatched] Session: {session_id} -> Executing: {tool_names}")
@@ -199,13 +185,17 @@ workflow.add_node("action_tracker", action_tracker_node)
 workflow.add_node("tools", tool_node)
 
 # Bind tool validation endpoints across all worker components
-executor_map = {"execute_tools": "action_tracker", "critic_agent": "critic_agent", "self_correct": "self_correct"}
+# When executor has no more tool calls, routes to finding_extractor for structured extraction
+executor_map = {"execute_tools": "action_tracker", "finding_extractor": "finding_extractor"}
 workflow.add_conditional_edges("general_memory", evaluate_tool_hooks, executor_map)
 workflow.add_conditional_edges("research_papers", evaluate_tool_hooks, executor_map)
 workflow.add_conditional_edges("vision_detection", evaluate_tool_hooks, executor_map)
 
 # Link tracker directly to the actual LangChain ToolNode
 workflow.add_edge("action_tracker", "tools")
+
+# finding_extractor always proceeds to critic_agent after extraction completes
+workflow.add_edge("finding_extractor", "critic_agent")
 
 def route_back_to_agent(state: AgentState) -> str:
     """
@@ -219,16 +209,6 @@ def route_back_to_agent(state: AgentState) -> str:
 
 workflow.add_conditional_edges(
     "tools",
-    route_back_to_agent,
-    {
-        "general_memory": "general_memory",
-        "research_papers": "research_papers",
-        "vision_detection": "vision_detection"
-    }
-)
-
-workflow.add_conditional_edges(
-    "self_correct",
     route_back_to_agent,
     {
         "general_memory": "general_memory",

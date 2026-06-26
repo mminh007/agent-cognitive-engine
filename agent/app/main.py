@@ -27,11 +27,11 @@ async def lifespan(app: FastAPI):
 
     logger.info("⚙️ Booting up internal background schedulers...")
     
-    # Configure the ChromaDB pruning function to run every 24 hours with safeguards against overlapping executions
+    # Configure the Qdrant pruning function to run every 24 hours with safeguards against overlapping executions
     scheduler.add_job(
         run_pruning_policy,
         trigger=IntervalTrigger(hours=24),
-        id="chromadb_pruning_job",
+        id="qdrant_pruning_job",
         replace_existing=True,
         max_instances=1
     )
